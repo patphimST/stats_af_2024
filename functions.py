@@ -10,7 +10,7 @@ from datetime import datetime
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']
 
-client = MongoClient(config.mongo_pat, tlsCAFile=certifi.where())
+client = MongoClient(f'mongodb+srv://{config.mongo_pat}', tlsCAFile=certifi.where())
 
 # MongoDB collections
 db = client['legacy-api-management']
