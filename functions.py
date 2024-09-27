@@ -4,21 +4,22 @@ import dns.resolver
 import certifi
 from bson import ObjectId, errors
 import config
+import os
 from datetime import datetime
 
 # DNS resolver and MongoDB connection setup
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']
 
-client = MongoClient(f'mongodb+srv://{config.mongo_pat}', tlsCAFile=certifi.where())
-
-# MongoDB collections
-db = client['legacy-api-management']
-col_items = db["items"]
-col_bills = db["bills"]
-col_users = db["users"]
-col_soc = db["societies"]
-col_billings = db["billings"]
+# client = MongoClient(f'mongodb+srv://{config.mongo_pat}', tlsCAFile=certifi.where())
+#
+# # MongoDB collections
+# db = client['legacy-api-management']
+# col_items = db["items"]
+# col_bills = db["bills"]
+# col_users = db["users"]
+# col_soc = db["societies"]
+# col_billings = db["billings"]
 
 airports_df = pd.read_csv("const/Air Airports and cities codes - O&D  2024.csv", delimiter=";")
 rail_metro_df = pd.read_csv("const/O&D Metropolis rail 2024 v In&Out.csv",delimiter=";")
@@ -875,8 +876,7 @@ def calculate_rr_and_ratios(id_soc):
         prev_year = current_year
 
     # Filtrer les données du mois N et N-1
-    df_n = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] == prev_month)].drop_duplicates(
-        subset=['O&D']).set_index('O&D')
+    df_n = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] == prev_month)].drop_duplicates(subset=['O&D']).set_index('O&D')
     df_n.to_csv("test.csv")
 
     # Prendre les données du mois précédent de l'année précédente
@@ -885,15 +885,16 @@ def calculate_rr_and_ratios(id_soc):
 
     df_online_n = df_online_grouped[(df_online_grouped['YEAR'] == current_year) & (df_online_grouped['MONTH'] == prev_month)].drop_duplicates(subset=['O&D']).set_index('O&D')
 
-
     # Calcul des RR pour chaque colonne
     columns_to_calculate = ['CA TOTAL INDUSTRIE', 'CA GROUPE AF KL', 'NB O&D GROUPE AF KL', 'NB O&D INDUSTRIE']
     df_rr_combined = pd.DataFrame(index=df_n.index)
     for column in columns_to_calculate:
-        df_rr = df_n[[column]].join(df_n_1[[column]], lsuffix='_N', rsuffix='_N-1')
-        df_rr[f'RR_{column}'] = (((df_rr[f'{column}_N'] / df_rr[f'{column}_N-1']) - 1) * 100).fillna(0).round(2)
-        df_rr_combined = df_rr_combined.join(df_rr[[f'{column}_N', f'RR_{column}']])
+        df_rr = df_n[[column]].join(df_n_1[[column]], lsuffix='_N', rsuffix='_N_1')
+        df_rr[f'RR_{column}'] = (((df_rr[f'{column}_N'] / df_rr[f'{column}_N_1']) - 1) * 100).fillna(0).round(2)
+        # Join N-1 and N values to df_rr_combined
+        df_rr_combined = df_rr_combined.join(df_rr[[f'{column}_N', f'{column}_N_1', f'RR_{column}']])
 
+    # Save the final CSV with N and N-1 values along with RR calculations
     # Calcul des ratios TP CA et TP OD
     df_rr_combined['TP_CA_AF_KL'] = (df_n['CA GROUPE AF KL'] / df_n['CA TOTAL INDUSTRIE']).round(2)
     df_rr_combined['TP_OD_AF_KL'] = (df_n['NB O&D GROUPE AF KL'] / df_n['NB O&D INDUSTRIE']).round(2)
@@ -984,31 +985,40 @@ def calculate_rr_and_ratios(id_soc):
 
     # Calculer le cumul TP_CA_AF_KL et TP_OD_AF_KL par O&D pour l'année N-1
     df_cumul_grouped['cumul_TP_CA_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(
-        df_cumul_n_1_grouped.set_index('O&D').apply(
-            lambda row: (row['CA GROUPE AF KL'] / row['CA TOTAL INDUSTRIE']).round(2) if row[
-                                                                                             'CA TOTAL INDUSTRIE'] > 0 else 0,
-            axis=1
-        )
-    )
+        df_cumul_n_1_grouped.set_index('O&D').apply(lambda row: (row['CA GROUPE AF KL'] / row['CA TOTAL INDUSTRIE']).round(2) if row['CA TOTAL INDUSTRIE'] > 0 else 0,
+            axis=1))
 
-    df_cumul_grouped['cumul_TP_OD_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(
-        df_cumul_n_1_grouped.set_index('O&D').apply(
-            lambda row: (row['NB O&D GROUPE AF KL'] / row['NB O&D INDUSTRIE']).round(2) if row[
-                                                                                               'NB O&D INDUSTRIE'] > 0 else 0,
-            axis=1
-        )
-    )
+    df_cumul_grouped['cumul_TP_OD_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(df_cumul_n_1_grouped.set_index('O&D').apply(lambda row: (row['NB O&D GROUPE AF KL'] / row['NB O&D INDUSTRIE']).round(2) if row['NB O&D INDUSTRIE'] > 0 else 0,
+            axis=1))
 
     # Calcul des cumuls EVOL_TP_CA et EVOL_TP_OD en utilisant les cumuls
-    df_cumul_grouped['cumul_EVOL_TP_CA'] = (
-            df_cumul_grouped['cumul_TP_CA_AF_KL'] - df_cumul_grouped['cumul_TP_CA_AF_KL_N_1']
-    ).round(2)
+    df_cumul_grouped['cumul_EVOL_TP_CA'] = (df_cumul_grouped['cumul_TP_CA_AF_KL'] - df_cumul_grouped['cumul_TP_CA_AF_KL_N_1']).round(2)
 
-    df_cumul_grouped['cumul_EVOL_TP_OD'] = (
-            df_cumul_grouped['cumul_TP_OD_AF_KL'] - df_cumul_grouped['cumul_TP_OD_AF_KL_N_1']
-    ).round(2)
+    df_cumul_grouped['cumul_EVOL_TP_OD'] = (df_cumul_grouped['cumul_TP_OD_AF_KL'] - df_cumul_grouped['cumul_TP_OD_AF_KL_N_1']).round(2)
     # Joindre les résultats "Online" à df_cumul_grouped sans écraser les colonnes
     df_cumul_grouped = df_cumul_grouped.join(df_online_cumul_grouped.set_index('O&D')[['cumul_TP_CA_AF_KL_ONLINE', 'cumul_TP_OD_AF_KL_ONLINE']], on='O&D')
+
+    # Filtrer les données pour l'année N-1
+    df_cumul_n_1 = df_grouped[(df_grouped['YEAR'] == current_year - 1) & (df_grouped['MONTH'] <= prev_month)]
+
+    # Grouper par 'O&D' pour calculer les cumuls pour N-1
+    df_cumul_n_1_grouped = df_cumul_n_1.groupby('O&D').agg({
+        'CA TOTAL INDUSTRIE': 'sum',
+        'CA GROUPE AF KL': 'sum',
+        'NB O&D GROUPE AF KL': 'sum',
+        'NB O&D INDUSTRIE': 'sum'
+    }).reset_index()
+
+    # Renommer les colonnes pour indiquer qu'il s'agit des cumuls N-1
+    df_cumul_n_1_grouped.rename(columns={
+        'CA TOTAL INDUSTRIE': 'cumul_CA_TOTAL_INDUSTRIE_N_1',
+        'CA GROUPE AF KL': 'cumul_CA_GROUPE_AF_KL_N_1',
+        'NB O&D GROUPE AF KL': 'cumul_NB_O&D_GROUPE_AF_KL_N_1',
+        'NB O&D INDUSTRIE': 'cumul_NB_O&D_INDUSTRIE_N_1'
+    }, inplace=True)
+
+    # Fusionner ces données avec les cumuls de l'année en cours
+    df_cumul_grouped = df_cumul_grouped.merge(df_cumul_n_1_grouped.set_index('O&D'), on='O&D', how='left')
 
     # Fusionner les résultats de RR, TP et cumuls avec df_rr_combined sans écraser les colonnes
     df_final = df_rr_combined.join(df_cumul_grouped.set_index('O&D'), on='O&D')
@@ -1048,108 +1058,82 @@ def merge_rr(id_soc):
     # Split 'O&D' into 'ORI' and 'DEST'
     grouped_flight_rr[['ORI', 'DEST']] = grouped_flight_rr['O&D'].str.split(n=1, expand=True)
 
-    # Réorganiser les colonnes selon l'ordre spécifié
-    columns_order = [
-        'O&D', 'ANNEX_C', 'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION','COUNTRY_OF_DEST',
-        'HAUL_TYPE', 'ORIGIN_AREA', 'CA TOTAL INDUSTRIE_N', 'RR_CA TOTAL INDUSTRIE',
-        'NB O&D INDUSTRIE_N', 'RR_NB O&D INDUSTRIE', 'CA GROUPE AF KL_N', 'RR_CA GROUPE AF KL',
-        'NB O&D GROUPE AF KL_N', 'RR_NB O&D GROUPE AF KL', 'TP_CA_AF_KL', 'TP_CA_AF_KL_ONLINE',
-        'EVOL_TP_CA', 'TP_OD_AF_KL', 'TP_OD_AF_KL_ONLINE', 'EVOL_TP_OD', 'cumul_CA_TOTAL_INDUSTRIE',
-        'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE', 'cumul_RR_NB O&D INDUSTRIE',
-        'cumul_CA_GROUPE_AF_KL', 'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
-        'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE',
-        'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
-    ]
 
-    # Réorganiser les colonnes dans l'ordre spécifié
-    grouped_flight_rr = grouped_flight_rr[columns_order]
-
-    # Sauvegarder le DataFrame final
     grouped_flight_rr.to_csv(f'csv/res/grouped_flight_full_{id_soc}.csv', index=False)
 
-import numpy as np
+import pandas as pd
 
 def action_csv(id_soc):
-    rr_df = pd.read_csv(f"csv/res/grouped_flight_with_rr_{id_soc}.csv")
-    full_df = pd.read_csv(f"csv/res/grouped_flight_full_{id_soc}.csv")
+    # Load the input CSV files
+    df0 = pd.read_csv(f"csv/res/grouped_flight_with_rr_{id_soc}.csv")
+    df1 = pd.read_csv(f"csv/res/grouped_flight_full_{id_soc}.csv")
 
-    rr_df['ANNEX_C'] = rr_df['O&D'].map(
-        full_df.set_index('O&D')['ANNEX_C'])
+    # Map the ANNEX_C values from the full_df to df based on 'O&D'
+    df = pd.merge(df0, df1, how='inner', on=[col for col in df0.columns if col in df1.columns])
 
-    # Save the updated DataFrame with the 'ANNEX_C' column added
-    output_path = 'csv/res/temp.csv'
-    rr_df.to_csv(output_path, index=False)
+    df.to_csv("test.csv")
 
-    # Split by 'ANNEX_C'
-    grouped = rr_df.groupby('ANNEX_C')
+    # Define a function to compute the totals and append them to the DataFrame
+    def calculate_totals_and_append(df):
+        # Apply the summing rules for each required column
+        totals = {
+            'O&D': 'TOTAL',
+            'CA TOTAL INDUSTRIE_N': df['CA TOTAL INDUSTRIE_N'].sum(),
+            'CA TOTAL INDUSTRIE_N_1': df['CA TOTAL INDUSTRIE_N_1'].sum(),
+            'RR_CA TOTAL INDUSTRIE': ((df['CA TOTAL INDUSTRIE_N'].sum() / df[
+                'CA TOTAL INDUSTRIE_N_1'].sum()) - 1) * 100 if df['CA TOTAL INDUSTRIE_N_1'].sum() != 0 else 0,
+            'CA GROUPE AF KL_N': df['CA GROUPE AF KL_N'].sum(),
+            'CA GROUPE AF KL_N_1': df['CA GROUPE AF KL_N_1'].sum(),
+            'RR_CA GROUPE AF KL': ((df['CA GROUPE AF KL_N'].sum() / df['CA GROUPE AF KL_N_1'].sum()) - 1) * 100 if df[
+                                                                                                                       'CA GROUPE AF KL_N_1'].sum() != 0 else 0,
+            'NB O&D GROUPE AF KL_N': df['NB O&D GROUPE AF KL_N'].sum(),
+            'NB O&D GROUPE AF KL_N_1': df['NB O&D GROUPE AF KL_N_1'].sum(),
+            'RR_NB O&D GROUPE AF KL': ((df['NB O&D GROUPE AF KL_N'].sum() / df[
+                'NB O&D GROUPE AF KL_N_1'].sum()) - 1) * 100 if df['NB O&D GROUPE AF KL_N_1'].sum() != 0 else 0,
+            'NB O&D INDUSTRIE_N': df['NB O&D INDUSTRIE_N'].sum(),
+            'NB O&D INDUSTRIE_N_1': df['NB O&D INDUSTRIE_N_1'].sum(),
+            'RR_NB O&D INDUSTRIE': ((df['NB O&D INDUSTRIE_N'].sum() / df['NB O&D INDUSTRIE_N_1'].sum()) - 1) * 100 if
+            df['NB O&D INDUSTRIE_N_1'].sum() != 0 else 0,
+            'TP_CA_AF_KL': df['CA GROUPE AF KL_N'].sum() / df['CA TOTAL INDUSTRIE_N'].sum() if df[
+                                                                                                   'CA TOTAL INDUSTRIE_N'].sum() != 0 else 0,
+            'TP_OD_AF_KL': df['NB O&D GROUPE AF KL_N'].sum() / df['NB O&D INDUSTRIE_N'].sum() if df[
+                                                                                                     'NB O&D INDUSTRIE_N'].sum() != 0 else 0,
+            'TP_CA_AF_KL_N_1': df['CA GROUPE AF KL_N_1'].sum() / df['CA TOTAL INDUSTRIE_N_1'].sum() if df[
+                                                                                                           'CA TOTAL INDUSTRIE_N_1'].sum() != 0 else 0,
+            'TP_OD_AF_KL_N_1': df['NB O&D GROUPE AF KL_N_1'].sum() / df['NB O&D INDUSTRIE_N_1'].sum() if df[
+                                                                                                             'NB O&D INDUSTRIE_N_1'].sum() != 0 else 0,
+        }
 
-    # Prepare lists to store results
-    result_dfs = []
+        # Convert the totals dictionary to a DataFrame and append it to the existing DataFrame
+        totals_df = pd.DataFrame([totals])
+        return pd.concat([df, totals_df], ignore_index=True)
 
-    # Loop over each group (each ANNEX_C)
-    for annex_c, group_df in grouped:
-        # Calculate the sum for all numerical columns except RR, TP, and EVOL
-        totals = group_df[
-            ['CA TOTAL INDUSTRIE_N', 'CA GROUPE AF KL_N', 'NB O&D GROUPE AF KL_N', 'NB O&D INDUSTRIE_N']].sum()
+    # Split the DataFrame based on the 'ANNEX_C' column
+    df_split = dict(tuple(df.groupby('ANNEX_C')))
 
-        # Avoid divide by zero by checking for zero totals
-        if totals['CA TOTAL INDUSTRIE_N'] == 0:
-            rr_ca_total_industrie = np.nan
-            tp_ca_af_kl = np.nan
-        else:
-            rr_ca_total_industrie = (
-                        ((totals['CA TOTAL INDUSTRIE_N']) / (totals['CA TOTAL INDUSTRIE_N']) - 1) * 100).round(2)
-            tp_ca_af_kl = (totals['CA GROUPE AF KL_N'] / totals['CA TOTAL INDUSTRIE_N']).round(2)
+    # Iterate through the split DataFrames and save each part as a CSV file locally, with totals appended
+    for key, df_part in df_split.items():
+        # Calculate the totals and append them to the DataFrame
+        df_with_totals = calculate_totals_and_append(df_part)
 
-        if totals['NB O&D INDUSTRIE_N'] == 0:
-            rr_nb_od_industrie = np.nan
-            tp_od_af_kl = np.nan
-        else:
-            rr_nb_od_industrie = (((totals['NB O&D INDUSTRIE_N']) / (totals['NB O&D INDUSTRIE_N']) - 1) * 100).round(2)
-            tp_od_af_kl = (totals['NB O&D GROUPE AF KL_N'] / totals['NB O&D INDUSTRIE_N']).round(2)
+        # Create the filename based on the 'ANNEX_C' value
+        filename = f"split_by_{key}_with_totals.csv"
 
-        # Calculate RR for CA GROUPE AF KL and NB O&D GROUPE AF KL
-        if totals['CA GROUPE AF KL_N'] != 0:
-            rr_ca_groupe_af_kl = (((totals['CA GROUPE AF KL_N']) / (totals['CA GROUPE AF KL_N']) - 1) * 100).round(2)
-        else:
-            rr_ca_groupe_af_kl = np.nan
+        # Save the DataFrame part with totals to a CSV file locally
+        df_with_totals.to_csv(filename, index=False)
 
-        if totals['NB O&D GROUPE AF KL_N'] != 0:
-            rr_nb_od_groupe_af_kl = (
-                        ((totals['NB O&D GROUPE AF KL_N']) / (totals['NB O&D GROUPE AF KL_N']) - 1) * 100).round(2)
-        else:
-            rr_nb_od_groupe_af_kl = np.nan
+    print("Files saved successfully with totals included in each split file!")
 
-        # Evolution (change from previous period)
-        # For the current example, assuming we're evolving from previous period values stored in columns or other logic
-        evol_tp_ca = np.nan if tp_ca_af_kl is np.nan else tp_ca_af_kl  # Replace with actual logic
-        evol_tp_od = np.nan if tp_od_af_kl is np.nan else tp_od_af_kl  # Replace with actual logic
-
-        # Create a new DataFrame for this ANNEX_C group
-        result_df = pd.DataFrame({
-            'ANNEX_C': [annex_c],
-            'Total_CA_TOTAL_INDUSTRIE': [totals['CA TOTAL INDUSTRIE_N']],
-            'Total_CA_GROUPE_AF_KL': [totals['CA GROUPE AF KL_N']],
-            'Total_NB_O&D_GROUPE_AF_KL': [totals['NB O&D GROUPE AF KL_N']],
-            'Total_NB_O&D_INDUSTRIE': [totals['NB O&D INDUSTRIE_N']],
-            'RR_CA_TOTAL_INDUSTRIE': [rr_ca_total_industrie],
-            'RR_CA_GROUPE_AF_KL': [rr_ca_groupe_af_kl],
-            'RR_NB_O&D_GROUPE_AF_KL': [rr_nb_od_groupe_af_kl],
-            'RR_NB_O&D_INDUSTRIE': [rr_nb_od_industrie],
-            'TP_CA_AF_KL': [tp_ca_af_kl],
-            'TP_OD_AF_KL': [tp_od_af_kl],
-            'EVOL_TP_CA': [evol_tp_ca],
-            'EVOL_TP_OD': [evol_tp_od]
-        })
-
-        # Append the result for this group to the list
-        result_dfs.append(result_df)
-
-    # Concatenate all the result DataFrames into a single DataFrame
-    final_df = pd.concat(result_dfs, ignore_index=True)
-
-    # Save the result to a CSV file
-    final_df.to_csv(f'csv/res/grouped_flight_annex_totals_{id_soc}.csv', index=False)
-
-
-
+    # # Réorganiser les colonnes selon l'ordre spécifié
+    # columns_order = [
+    #     'O&D', 'ANNEX_C', 'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION', 'COUNTRY_OF_DEST',
+    #     'HAUL_TYPE', 'ORIGIN_AREA', 'CA TOTAL INDUSTRIE_N', 'RR_CA TOTAL INDUSTRIE',
+    #     'NB O&D INDUSTRIE_N', 'RR_NB O&D INDUSTRIE', 'CA GROUPE AF KL_N', 'RR_CA GROUPE AF KL',
+    #     'NB O&D GROUPE AF KL_N', 'RR_NB O&D GROUPE AF KL', 'TP_CA_AF_KL', 'TP_CA_AF_KL_ONLINE',
+    #     'EVOL_TP_CA', 'TP_OD_AF_KL', 'TP_OD_AF_KL_ONLINE', 'EVOL_TP_OD', 'cumul_CA_TOTAL_INDUSTRIE',
+    #     'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE', 'cumul_RR_NB O&D INDUSTRIE',
+    #     'cumul_CA_GROUPE_AF_KL', 'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
+    #     'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE',
+    #     'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
+    # ]
+    #
