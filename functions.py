@@ -21,6 +21,8 @@ col_soc = db["societies"]
 col_billings = db["billings"]
 
 airports_df = pd.read_csv("const/Air Airports and cities codes - O&D  2024.csv", delimiter=";")
+rail_metro_df = pd.read_csv("const/O&D Metropolis rail 2024 v In&Out.csv",delimiter=";")
+rail_euro_df = pd.read_csv("const/O&D European Rail 2024 v In&Out.csv",delimiter=";")
 carrier_list = ["AF", "KL", "DL", "LU", "TO", "HV", "VS"]
 
 def get_bills(id_soc,start_date):
@@ -63,7 +65,6 @@ def get_bills(id_soc,start_date):
                 "type": line.get("type"),
                 "TOTAL_BILLED": line.get("price", {}).get("amount"),
                 "userIds": ', '.join([str(user_id) for user_id in line.get("userIds", [])])
-                # Convertir les ObjectId en str
             }
             data.append(item_data)
 
@@ -73,6 +74,10 @@ def get_bills(id_soc,start_date):
     df.to_csv(f"csv/base/bills_{id_soc}.csv")
     # Afficher le DataFrame
     print(df)
+
+##################################
+##################################
+##################################
 
 def fetch_flight_details(item_id):
     # Chercher l'item dans la collection MongoDB
@@ -175,17 +180,23 @@ def classify_airline(concat_carrier):
     return "INDUSTRIE"
 
 def lookup_airport_details(concatenated_city):
+    # Find the matching row where 'O&D restitué' matches the given concatenated_city
     match_row = airports_df[airports_df['O&D restitué'] == concatenated_city]
 
     if not match_row.empty:
+        # Extract values for each field if a match is found
         haul_type = match_row['Haul type'].values[0]
         origin_area = match_row['Origin area'].values[0]
         annex_c = match_row['Annex C/ Out of Annex C 2023'].values[0]
         label_origin = match_row['Label cities of origin'].values[0]
         label_destination = match_row['Label cities of destination'].values[0]
-        return haul_type, origin_area, annex_c, label_origin, label_destination
+        label_country_destination = match_row['Label country of destination'].values[0]  # Add this line
 
-    return "", "", "", "", ""  # Si aucune correspondance n'est trouvée
+        # Return all the extracted values
+        return haul_type, origin_area, annex_c, label_origin, label_destination, label_country_destination
+
+    # Return empty strings if no match is found
+    return "", "", "", "", "", ""
 
 def lookup_ndc_code(city, primary_column, primary_code_column, secondary_column=None, secondary_code_column=None):
     # Chercher la ville dans le fichier CSV dans la colonne primaire (e.g., 'Airport origin code')
@@ -201,7 +212,7 @@ def lookup_ndc_code(city, primary_column, primary_code_column, secondary_column=
             return code_row[secondary_code_column].values[0]
 
     return ""
-def get_items(id_soc, start_date):
+def get_items_flight(id_soc, start_date):
     filter_criteria = {
         "society._id": ObjectId(id_soc),
         "createdAt": {"$gte": start_date},
@@ -319,27 +330,25 @@ def get_items(id_soc, start_date):
     df['AIRLINE_GROUP'] = df['CONCAT_carrier'].apply(classify_airline)
 
     # Sauvegarder le DataFrame en CSV
-    df.to_csv(f"csv/base/items_{id_soc}.csv", index=False)
-    print(df.head())  # Afficher les premières lignes du DataFrame
+    df.to_csv(f"csv/base/items_flight_{id_soc}.csv", index=False)
 
-def merge_extract(id_soc):
+def merge_extract_flight(id_soc):
     df0 = pd.read_csv(f"csv/base/bills_{id_soc}.csv")
     df0 = df0[df0["type"] == "flight"]
-    df1 = pd.read_csv(f"csv/base/items_{id_soc}.csv")
+    df1 = pd.read_csv(f"csv/base/items_flight_{id_soc}.csv")
     df = pd.merge(df0, df1, on='ITEM_ID', how='inner')
 
     # Convert CREATED_AT to YYYY-MM and YYYY formats
     df['ISSUED_MONTH'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y%m')
     df['ODLIST'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y')
 
-    df.to_csv(f"csv/res//merge_{id_soc}.csv")
+    df.to_csv(f"csv/res/merge_flight_{id_soc}.csv")
 
 
     columns_to_keep = [
         'ITEM_ID', 'type_bill','ISSUED_MONTH', 'ODLIST', 'IS_OFFLINE','TOTAL_BILLED',
         'NB_LEGS', 'CONCATENATED_CITIES', 'HAUL_TYPE', 'ORIGIN_AREA', 'ANNEX_C',
         'LABEL_ORIGIN', 'LABEL_DESTINATION', 'AIRLINE_GROUP',
-
     ]
 
     # Sélectionner uniquement les colonnes spécifiées
@@ -350,6 +359,797 @@ def merge_extract(id_soc):
     df_filtered = df_filtered.sort_values(by='ODLIST')
 
     # Sauvegarde du DataFrame filtré dans un fichier CSV
-    df_filtered.to_csv(f'csv/res/filtered_{id_soc}.csv', index=False)
+    df_filtered.to_csv(f'csv/res/filtered_flight_{id_soc}.csv', index=False)
+
+def group_flight(id_soc):
+    # Charger le fichier CSV téléchargé
+    file_path = f'csv/res/filtered_flight_{id_soc}.csv'
+    df = pd.read_csv(file_path)
+
+    # Groupement par les colonnes spécifiées
+    grouping_columns = [
+        'CONCATENATED_CITIES', 'ORIGIN_AREA', 'ANNEX_C', 'LABEL_ORIGIN',
+        'LABEL_DESTINATION', 'ISSUED_MONTH', 'ODLIST', 'IS_OFFLINE'
+    ]
+
+    # Agrégation des données
+    df_grouped_af = df.groupby(grouping_columns).agg(
+        TOTAL_BILLED_AIR_FRANCE=('TOTAL_BILLED', lambda x: x[df['AIRLINE_GROUP'] == 'AIR FRANCE'].sum()),
+        TOTAL_BILLED_INDUSTRIE=('TOTAL_BILLED', lambda x: x[df['AIRLINE_GROUP'] == 'INDUSTRIE'].sum()),
+        NB_LEGS_AIR_FRANCE=('NB_LEGS', lambda x: x[df['AIRLINE_GROUP'] == 'AIR FRANCE'].sum()),
+        NB_LEGS_INDUSTRIE=('NB_LEGS', lambda x: x[df['AIRLINE_GROUP'] == 'INDUSTRIE'].sum())
+    ).reset_index()
+
+    # fichier brut
+    df_grouped = df.groupby(grouping_columns).agg({
+        'TOTAL_BILLED': 'sum',
+        'NB_LEGS': 'sum'}).reset_index()
+
+    df_grouped.to_csv(f"csv/res/grouped_flight_{id_soc}.csv")
+
+    # fichier af
+
+    df_grouped_af[['CODE ORIGINE', 'CODE DESTINATION']] = df_grouped_af['CONCATENATED_CITIES'].str.split(' ', n=1, expand=True)
+
+    # Renommer les colonnes
+    df_grouped_af = df_grouped_af.rename(columns={
+        "CONCATENATED_CITIES" : "O&D",
+        "ISSUED_MONTH": "DATE D'EMISSION",
+        'ORIGIN_AREA': 'ZONE ORIGINE',
+        'ANNEX_C': 'PERIMETRE',
+        'LABEL_ORIGIN': 'LIBELLE ORIGINE',
+        'LABEL_DESTINATION': 'LIBELLE DESTINATION',
+        'IS_OFFLINE': 'TYPE DE VENTE',
+        'TOTAL_BILLED_AIR_FRANCE': 'CA GROUPE AF KL',
+        'NB_LEGS_AIR_FRANCE': 'NB O&D GROUPE AF KL',
+        'TOTAL_BILLED_INDUSTRIE': 'CA TOTAL INDUSTRIE',
+        'NB_LEGS_INDUSTRIE': 'NB O&D INDUSTRIE',
+    })
+    df_grouped_af['CA GROUPE AF KL'] = df_grouped_af['CA GROUPE AF KL'].round(0).astype(int)
+    df_grouped_af['NB O&D GROUPE AF KL'] = df_grouped_af['NB O&D GROUPE AF KL'].round(0).astype(int)
+    df_grouped_af['CA TOTAL INDUSTRIE'] = df_grouped_af['CA TOTAL INDUSTRIE'].round(0).astype(int)
+    df_grouped_af['NB O&D INDUSTRIE'] = df_grouped_af['NB O&D INDUSTRIE'].round(0).astype(int)
+    df_grouped_af['REFERENCE AF'] = ''
+    df_grouped_af['RAISON SOCIALE'] = ''
+    df_grouped_af['IATA EMETTEUR'] = ''
+
+    # Connexion en base pour recup OIN et NAME
+    result = col_soc.find_one({"_id": ObjectId(id_soc)})
+
+    # Extraire les variables "name" et "settings.flight.bluebizz"
+    name = result.get("name", "Unknown")  # Assigner une valeur par défaut si name est None
+    bluebizz = result.get("settings", {}).get("flight", {}).get("bluebizz", "Bluebizz")  # Valeur par défaut
+    bluebizz_value = bluebizz if bluebizz else "Bluebizz"
+
+    print(name, bluebizz_value)
+
+    # Remplir les colonnes du DataFrame avec les valeurs récupérées
+    df_grouped_af['REFERENCE AF'] = bluebizz_value
+    df_grouped_af['RAISON SOCIALE'] = name
+
+    # Trier les valeurs par "DATE D'EMISSION" et "O&D"
+    df_grouped_af = df_grouped_af.sort_values(by=["DATE D'EMISSION", "O&D"], ascending=[False, True])
+
+    # Vérifier si les valeurs de 'O&D' de flight_df sont présentes dans 'O&D restitué' de airports_df
+    df_grouped_af['O&D_match'] = df_grouped_af['O&D'].isin(airports_df['O&D restitué'])
+
+    # Filtrer les lignes où 'O&D' a une correspondance dans airports_df
+    filtered_grouped_af = df_grouped_af[df_grouped_af['O&D_match']].drop(columns=['O&D_match'])
+
+    # Sauvegarder le DataFrame filtré dans un nouveau fichier CSV
+    filtered_grouped_af.to_csv(f"csv/res/grouped_flight_{id_soc}.csv", index=False)
+
+    print(f"File saved: csv/res/grouped_flight_{id_soc}.csv")
+###################################################
+###################################################
+###################################################
+# TRAIN
+def fetch_train_details(item_id):
+    # Chercher l'item dans la collection MongoDB
+    item = col_items.find_one({"id": item_id})
+    print(item_id)
+
+    if item and item.get('type') == 'train':
+        journeys = item.get('detail', {}).get('journeys', [])
+        nombre_leg = len(journeys)  # Nombre de voyages/jambes
+
+        all_legs_details = []
+
+        # Boucle sur tous les voyages (journeys)
+        for journey_index, journey in enumerate(journeys):
+            # Vérifier si 'departure' et 'arrival' existent au niveau du voyage
+            if journey.get('departure') and journey.get('arrival'):
+                ori_locationId = journey['departure'].get('locationId', '')
+                des_locationId = journey['arrival'].get('locationId', '')
+
+                leg_details = {
+                    f"{journey_index}_ori_name": journey['departure'].get('name', ''),
+                    f"{journey_index}_des_name": journey['arrival'].get('name', ''),
+                    f"{journey_index}_ori_locationId": ori_locationId,
+                    f"{journey_index}_des_locationId": des_locationId,
+                }
+                all_legs_details.append(leg_details)
+            else:
+                # Si 'departure' et 'arrival' n'existent pas, chercher dans les 'segments'
+                segments = journey.get('segments', [])
+                for segment_index, segment in enumerate(segments):
+                    ori_locationId = segment['departure'].get('locationId', '')
+                    des_locationId = segment['arrival'].get('locationId', '')
+
+                    leg_details = {
+                        f"{segment_index}_ori_name": segment['departure'].get('name', ''),
+                        f"{segment_index}_des_name": segment['arrival'].get('name', ''),
+                        f"{segment_index}_ori_locationId": ori_locationId,
+                        f"{segment_index}_des_locationId": des_locationId,
+                    }
+                    all_legs_details.append(leg_details)
+
+        # Fusionner tous les détails des segments dans un seul dictionnaire
+        combined_leg_details = {}
+        for leg_detail in all_legs_details:
+            combined_leg_details.update(leg_detail)
+
+        return combined_leg_details, nombre_leg
+
+    return {}, 0
+
+def get_items_train(id_soc, start_date):
+    filter_criteria = {
+        "society._id": ObjectId(id_soc),
+        "createdAt": {"$gte": start_date},
+        "type": "train",
+        "statusHistory.to": "confirmed",
+        "status": {"$in": ["confirmed", "cancelled"]}
+    }
+
+    projection = {
+        "id": 1,
+        "offline": 1,
+        "createdAt": 1,
+        "type": 1,
+        "status": 1,
+        "billingId": 1,
+        "travelers.billingId": 1,
+        "detail.trips": 1,
+        "_id": 0
+    }
+
+    items = col_items.find(filter_criteria, projection)
+    data = []
+
+    for item in items:
+        offline_status = "Offline" if item.get("offline") else "Online"
+        item_type = item.get("type")
+        item_createdAt = item.get("createdAt")
+        item_status = item.get("status", "Unknown")
+
+        billing_id = item.get("billingId")
+        if not billing_id:
+            travelers = item.get("travelers", [])
+            billing_id = next((traveler.get("billingId") for traveler in travelers if traveler.get("billingId")), None)
+
+        raison = "Unknown"
+        if billing_id:
+            try:
+                billing_doc = col_billings.find_one({"_id": ObjectId(billing_id)}, {"raison": 1})
+            except errors.InvalidId:
+                billing_doc = col_billings.find_one({"_id": billing_id}, {"raison": 1})
+
+            if billing_doc:
+                raison = billing_doc.get("raison", "Unknown")
+
+        # Récupérer les détails des segments et le nombre de jambes (legs) avec `fetch_train_details`
+        leg_details, nombre_leg = fetch_train_details(item.get("id"))
+
+        # Initialisation de `basic_data`
+        basic_data = {
+            "ITEM_ID": item.get("id"),
+            "IS_OFFLINE": offline_status,
+            "CREATED_AT": item_createdAt,
+            "TYPE": item_type,
+            "STATUS": item_status,
+            "NB_LEGS": nombre_leg,  # Utilisation de nombre_leg ici
+            "BILLING_ID": billing_id,
+            "ENTITY": raison
+        }
+
+        # Fusionner les données de base avec les détails des jambes
+        combined_data = {**basic_data, **leg_details}
+
+        # Ajout au DataFrame
+        data.append(combined_data)
+
+    # Créer le DataFrame
+    df = pd.DataFrame(data)
+
+    # Sauvegarder le DataFrame en CSV
+    df.to_csv(f"csv/base/items_train_{id_soc}.csv", index=False)
+
+    print(df.head())
+
+def concat_and_remove_columns(id_soc):
+    df = pd.read_csv(f"csv/base/items_train_{id_soc}.csv")
+    ori_columns = [col for col in df.columns if col.startswith(tuple(f'{i}_ori_name' for i in range(2, 10)))]
+    des_columns = [col for col in df.columns if col.startswith(tuple(f'{i}_des_name' for i in range(2, 10)))]
+    ori_locationId_columns = [col for col in df.columns if col.startswith(tuple(f'{i}_ori_locationId' for i in range(2, 10)))]
+    des_locationId_columns = [col for col in df.columns if col.startswith(tuple(f'{i}_des_locationId' for i in range(2, 10)))]
+
+    # Concaténer les colonnes ori, des, locationId
+    df['ori_concat'] = df[ori_columns].apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+    df['des_concat'] = df[des_columns].apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+    df['ori_locationId_concat'] = df[ori_locationId_columns].apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+    df['des_locationId_concat'] = df[des_locationId_columns].apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+
+    # Supprimer les colonnes inutiles
+    columns_to_remove = ori_columns + des_columns + ori_locationId_columns+ des_locationId_columns
+    df.drop(columns=columns_to_remove, inplace=True)
+    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+
+def normalize_station_names(id_soc):
+    df = pd.read_csv(f"csv/base/temp_{id_soc}.csv")
+    # Liste des colonnes à traiter
+    name_columns = [col for col in df.columns if '_ori_name' in col or '_des_name' in col]
+
+    # Dictionnaire des remplacements
+    replacements = {
+        "PARIS": "PARIS",
+        "MONTPELLIER": "MONTPELLIER",
+        "MARSEILLE": "MARSEILLE ST CHARLES",
+        "BORDEAUX": "BORDEAUX",
+        "STRASBOURG": "STRASBOURG",
+        "LYON": "LYON"
+    }
+
+    # Fonction pour normaliser une entrée
+    def normalize_name(name):
+        if pd.isna(name):
+            return name
+        name_upper = name.upper()  # Mettre tout en majuscule pour ignorer la casse
+        for keyword, replacement in replacements.items():
+            if keyword in name_upper:
+                return replacement
+        return name  # Retourner le nom original s'il n'y a pas de correspondance
+
+    # Appliquer la normalisation à toutes les colonnes pertinentes
+    for col in name_columns:
+        df[col] = df[col].apply(normalize_name)
+
+    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+
+def fill_missing_location_ids(id_soc):
+    # Charger les fichiers CSV
+    temp_df = pd.read_csv(f"csv/base/temp_{id_soc}.csv")
+    metropolis_df = pd.read_csv("const/O&D Metropolis rail 2024 v In&Out.csv", delimiter=";")
+    european_df = pd.read_csv("const/O&D European Rail 2024 v In&Out.csv", delimiter=";")
+
+    # Liste des colonnes à traiter
+    location_columns = [
+        '0_ori_locationId', '0_des_locationId', '1_ori_locationId', '1_des_locationId',
+    ]
+
+    # Liste des colonnes correspondantes pour les noms (origine et destination)
+    name_columns = [
+        '0_ori_name', '0_des_name', '1_ori_name', '1_des_name',
+    ]
+
+    # Fonction pour interroger les fichiers et remplir le locationId
+    def lookup_location_id(name, ref_df):
+        # Chercher dans 'Label of railway station of origin'
+        origin_match = ref_df[ref_df['Label of railway station of origin'] == name]
+        if not origin_match.empty:
+            return origin_match['Railway station code NTS of origin'].values[0]
+        else:
+            # Chercher dans 'Label of railway station of destination'
+            destination_match = ref_df[ref_df['Label of railway station of destination'] == name]
+            if not destination_match.empty:
+                return destination_match['Railway station code NTS of destination'].values[0]
+        return "PAS TROUVÉ"
+
+    # Remplir les valeurs manquantes pour chaque paire (locationId, name)
+    for loc_col, name_col in zip(location_columns, name_columns):
+        for idx, row in temp_df.iterrows():
+            if pd.isna(row[loc_col]) and pd.notna(row[name_col]):
+                # Chercher dans le fichier Metropolis
+                result = lookup_location_id(row[name_col], metropolis_df)
+                if result == "PAS TROUVÉ":
+                    # Si pas trouvé dans Metropolis, chercher dans le fichier European
+                    result = lookup_location_id(row[name_col], european_df)
+                temp_df.at[idx, loc_col] = result
+    temp_df = temp_df[(temp_df['0_ori_locationId'] != "PAS TROUVÉ") & (temp_df['0_des_locationId'] != "PAS TROUVÉ")]
+    df = temp_df
+    def determine_zone(row):
+        # Vérifier si une des valeurs ne commence pas par 'FR'
+        columns_to_check = ['0_ori_locationId', '0_des_locationId', '1_ori_locationId', '1_des_locationId']
+
+        for col in columns_to_check:
+            if pd.notna(row[col]) and not row[col].startswith("FR"):
+                return "EUROPE"
+        return "METRO"
+    df['Zone'] = temp_df.apply(determine_zone, axis=1)
+
+    # Créer la colonne 'Zone' en appliquant la fonction determine_zone à chaque ligne
+
+    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+
+def process_locations(id_soc):
+    # Charger le DataFrame
+    df = pd.read_csv(f"csv/base/temp_{id_soc}.csv")
+    rail_metro_df = pd.read_csv('const/O&D Metropolis rail 2024 v In&Out.csv', delimiter=";")
+    rail_euro_df = pd.read_csv('const/O&D European Rail 2024 v In&Out.csv', delimiter=";")
+
+    # Fonction pour déterminer les 'ori_location_rest' et 'des_location_rest'
+    def determine_rest_locations(row):
+        if row['0_ori_name'] == 'PARIS':
+            return row['0_ori_locationId'], row['0_des_locationId']
+        elif row['0_des_name'] == 'PARIS':
+            return row['0_des_locationId'], row['0_ori_locationId']
+        else:
+            locations = sorted([row['0_ori_locationId'], row['0_des_locationId']])
+            ori_name, des_name = sorted([row['0_ori_name'], row['0_des_name']])
+            if ori_name == row['0_des_name']:
+                return row['0_des_locationId'], row['0_ori_locationId']
+            return locations[0], locations[1]
+
+    # Créer les colonnes 'ori_location_rest' et 'des_location_rest'
+    df['ori_location_rest'], df['des_location_rest'] = zip(*df.apply(determine_rest_locations, axis=1))
+
+    # Fonction pour interroger rail_metro_df si la zone est 'METRO'
+    def query_metropolis(ori_location, des_location):
+        ori_code, ori_area, ori_label, des_code, des_label, des_country = None, None, None, None, None, None
+
+        ori_match = rail_metro_df[rail_metro_df['Railway station code NTS of origin'] == ori_location]
+        if not ori_match.empty:
+            ori_code = ori_match['Origin code'].values[0]
+            ori_area = ori_match['Origin area'].values[0]
+            ori_label = ori_match['Label city of origin '].values[0]
+
+        des_match = rail_metro_df[rail_metro_df['Railway station code NTS of destination'] == des_location]
+        if not des_match.empty:
+            des_code = des_match['Destination code'].values[0]
+            des_country = des_match['Country code of destination'].values[0]
+            des_label = des_match['Label city of destination '].values[0]
+
+        return ori_code, ori_label, ori_area, des_code, des_label, des_country
+
+    # Fonction pour interroger rail_euro_df si la zone est 'EUROPE'
+    def query_europe(ori_location, des_location):
+        ori_code, ori_area, ori_label, des_code, des_label, des_country = None, None, None, None, None, None
+
+        ori_match = rail_euro_df[rail_euro_df['Railway station code NTS of origin'] == ori_location]
+        if not ori_match.empty:
+            ori_code = ori_match['Origin code'].values[0]
+            ori_area = ori_match['Origin area'].values[0]
+            ori_label = ori_match['Label city of origin '].values[0]
+
+        des_match = rail_euro_df[rail_euro_df['Railway station code NTS of destination'] == des_location]
+        if not des_match.empty:
+            des_code = des_match['Destination code'].values[0]
+            des_country = des_match['Country code of destination'].values[0]
+            des_label = des_match['Label city of destination '].values[0]
+
+        return ori_code, ori_label, ori_area, des_code, des_label, des_country
+
+    # Appliquer les requêtes pour les lignes en fonction de la zone
+    for idx, row in df.iterrows():
+        if row['Zone'] == 'METRO':
+            ori_code, ori_label, ori_area, des_code, des_label, des_country = query_metropolis(row['ori_location_rest'], row['des_location_rest'])
+        elif row['Zone'] == 'EUROPE':
+            ori_code, ori_label, ori_area, des_code, des_label, des_country = query_europe(row['ori_location_rest'], row['des_location_rest'])
+
+        df.at[idx, 'ori_code'] = ori_code
+        df.at[idx, 'ori_area'] = ori_area
+        df.at[idx, 'des_code'] = des_code
+        df.at[idx, 'des_country'] = des_country
+        df.at[idx, 'ori_label'] = ori_label
+        df.at[idx, 'des_label'] = des_label
+
+    # Sauvegarder dans deux fichiers CSV
+    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+    df.to_csv(f"csv/base/items_train_{id_soc}.csv", index=False)
+
+
+def merge_extract_train(id_soc):
+    df0 = pd.read_csv(f"csv/base/bills_{id_soc}.csv")
+    df0 = df0[df0["type"] == "train"]
+    df1 = pd.read_csv(f"csv/base/items_train_{id_soc}.csv")
+    df = pd.merge(df0, df1, on='ITEM_ID', how='inner')
+
+    # Convert CREATED_AT to YYYY-MM and YYYY formats
+    df['ISSUED_MONTH'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y%m')
+    df['ODLIST'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y')
+    df.to_csv(f"csv/res/merge_train_{id_soc}.csv")
+def clean_train(id_soc):
+    df = pd.read_csv(f'csv/res/merge_train_{id_soc}.csv')
+    df['O&D'] = df['ori_code'].fillna('') + " " + df['des_code'].fillna('')
+    grouped_columns = ['ISSUED_MONTH', 'ODLIST', 'O&D', 'ori_code', 'ori_label',
+                       'des_code', 'des_label', 'des_country', 'Zone',"ori_area"]
+
+    grouped_result = df.groupby(grouped_columns).agg(
+        TOTAL_BILLED=('TOTAL_BILLED', 'sum'),
+        NB_LEGS=('NB_LEGS', 'sum')
+    ).reset_index()
+    grouped_result = grouped_result.sort_values(by=['O&D', 'ISSUED_MONTH'], ascending=[True, False])
+
+    # Connexion en base pour recup OIN et NAME
+    result = col_soc.find_one({"_id": ObjectId(f"{id_soc}")},
+                              {"name": 1, "settings.flight.bluebizz": 1, "_id": 0})
+
+    # Extraire les variables "name" et "settings.flight.bluebizz"
+    name = result.get("name", None)
+    bluebizz = result.get("settings", {}).get("flight", {}).get("bluebizz", None)
+    bluebizz_value = bluebizz if bluebizz else "Bluebizz"
+
+    # Remplir les colonnes du DataFrame
+    grouped_result['REFERENCE AF'] = bluebizz_value
+    grouped_result['RAISON SOCIALE'] = name
+    grouped_result['IATA EMETTEUR'] = ""
+
+    #rename col
+    grouped_result = grouped_result.rename(columns={
+        "ISSUED_MONTH": "DATE D'EMISSION",
+        'ori_area': 'ZONE ORIGINE',
+        'ori_code': 'CODE ORIGINE',
+        'des_code': 'CODE DESTINATION',
+        'ori_label': 'LIBELLE ORIGINE',
+        'des_label': 'LIBELLE DESTINATION',
+        'TOTAL_BILLED': 'CA',
+        'NB_LEGS': 'NB O&D',
+        'des_country': 'PAYS DESTINATION',
+    })
+    columns_order = [
+        "O&D","Zone",'RAISON SOCIALE','REFERENCE AF',"DATE D'EMISSION",'CODE ORIGINE','LIBELLE ORIGINE', 'CODE DESTINATION','LIBELLE DESTINATION',"IATA EMETTEUR",'ZONE ORIGINE','CA','NB O&D'
+    ]
+
+    grouped_result = grouped_result[columns_order]
+    grouped_result = grouped_result.sort_values(by=["DATE D'EMISSION","O&D"], ascending=[False, True])
+
+    metro_df = grouped_result[grouped_result['Zone'] == 'METRO']
+    europe_df = grouped_result[grouped_result['Zone'] == 'EUROPE']
+
+    # Vérifier les correspondances pour la zone 'METRO'
+    metro_df = metro_df[metro_df['Zone'] == 'METRO']
+    metro_df['O&D_match'] = metro_df['O&D'].isin(rail_metro_df['O&D restitué'])
+
+    # Filtrer les lignes où 'O&D' a une correspondance
+    filtered_metro_df = metro_df[metro_df['O&D_match']].drop(columns=['O&D_match'])
+
+    # Vérifier les correspondances pour la zone 'EUROPE'
+    europe_df = europe_df[europe_df['Zone'] == 'EUROPE']
+    europe_df['O&D_match'] = europe_df['O&D'].isin(rail_euro_df['O&D restitué'])
+
+    # Filtrer les lignes où 'O&D' a une correspondance
+    filtered_europe_df = europe_df[europe_df['O&D_match']].drop(columns=['O&D_match'])
+
+    # Saving the two DataFrames to CSV files
+    filtered_metro_df.to_csv(f'csv/res/grouped_train_metro_{id_soc}.csv')
+    filtered_europe_df.to_csv(f'csv/res/grouped_train_euro_{id_soc}.csv')
+
+##################################
+##################################
+##################################
+def calculate_rr_and_ratios(id_soc):
+    import pandas as pd
+
+    # Charger les données
+    df = pd.read_csv(f"csv/res/grouped_flight_{id_soc}.csv")
+
+    # Convertir 'DATE D\'EMISSION' en datetime et extraire l'année et le mois
+    df['DATE D\'EMISSION'] = pd.to_datetime(df['DATE D\'EMISSION'], format='%Y%m')
+    df['YEAR'] = df['DATE D\'EMISSION'].dt.year
+    df['MONTH'] = df['DATE D\'EMISSION'].dt.month
+
+    # Filtrer les données pour "Online" uniquement
+    df_online = df[df['TYPE DE VENTE'] == 'Online']
+
+    # Grouper par O&D, DATE D'EMISSION
+    df_grouped = df.groupby(['O&D', 'DATE D\'EMISSION']).agg({
+        'CA TOTAL INDUSTRIE': 'sum',
+        'CA GROUPE AF KL': 'sum',
+        'NB O&D GROUPE AF KL': 'sum',
+        'NB O&D INDUSTRIE': 'sum'
+    }).reset_index()
+
+    df_online_grouped = df_online.groupby(['O&D', 'DATE D\'EMISSION']).agg({
+        'CA TOTAL INDUSTRIE': 'sum',
+        'CA GROUPE AF KL': 'sum',
+        'NB O&D GROUPE AF KL': 'sum',
+        'NB O&D INDUSTRIE': 'sum'
+    }).reset_index()
+
+    # Extraire l'année et le mois après le groupement
+    df_grouped['YEAR'] = df_grouped['DATE D\'EMISSION'].dt.year
+    df_grouped['MONTH'] = df_grouped['DATE D\'EMISSION'].dt.month
+    df_online_grouped['YEAR'] = df_online_grouped['DATE D\'EMISSION'].dt.year
+    df_online_grouped['MONTH'] = df_online_grouped['DATE D\'EMISSION'].dt.month
+
+    # Définir le mois et l'année précédents
+    current_year = pd.Timestamp.now().year
+    current_month = pd.Timestamp.now().month
+
+    # Si nous sommes en janvier, le mois précédent est décembre de l'année dernière
+    if current_month == 1:
+        prev_month = 12
+        prev_year = current_year - 1
+    else:
+        prev_month = current_month - 1
+        prev_year = current_year
+
+    # Filtrer les données du mois N et N-1
+    df_n = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] == prev_month)].drop_duplicates(
+        subset=['O&D']).set_index('O&D')
+    df_n.to_csv("test.csv")
+
+    # Prendre les données du mois précédent de l'année précédente
+    df_n_1 = df_grouped[(df_grouped['YEAR'] == current_year - 1) & (df_grouped['MONTH'] == prev_month)].drop_duplicates(
+        subset=['O&D']).set_index('O&D')
+
+    df_online_n = df_online_grouped[(df_online_grouped['YEAR'] == current_year) & (df_online_grouped['MONTH'] == prev_month)].drop_duplicates(subset=['O&D']).set_index('O&D')
+
+
+    # Calcul des RR pour chaque colonne
+    columns_to_calculate = ['CA TOTAL INDUSTRIE', 'CA GROUPE AF KL', 'NB O&D GROUPE AF KL', 'NB O&D INDUSTRIE']
+    df_rr_combined = pd.DataFrame(index=df_n.index)
+    for column in columns_to_calculate:
+        df_rr = df_n[[column]].join(df_n_1[[column]], lsuffix='_N', rsuffix='_N-1')
+        df_rr[f'RR_{column}'] = (((df_rr[f'{column}_N'] / df_rr[f'{column}_N-1']) - 1) * 100).fillna(0).round(2)
+        df_rr_combined = df_rr_combined.join(df_rr[[f'{column}_N', f'RR_{column}']])
+
+    # Calcul des ratios TP CA et TP OD
+    df_rr_combined['TP_CA_AF_KL'] = (df_n['CA GROUPE AF KL'] / df_n['CA TOTAL INDUSTRIE']).round(2)
+    df_rr_combined['TP_OD_AF_KL'] = (df_n['NB O&D GROUPE AF KL'] / df_n['NB O&D INDUSTRIE']).round(2)
+    df_rr_combined['TP_CA_AF_KL_N_1'] = (df_n_1['CA GROUPE AF KL'] / df_n_1['CA TOTAL INDUSTRIE']).round(2)
+    df_rr_combined['TP_OD_AF_KL_N_1'] = (df_n_1['NB O&D GROUPE AF KL'] / df_n_1['NB O&D INDUSTRIE']).round(2)
+
+    # Calcul des ratios "Online"
+    df_rr_combined['TP_CA_AF_KL_ONLINE'] = (df_online_n['CA GROUPE AF KL'] / df_online_n['CA TOTAL INDUSTRIE']).round(2)
+    df_rr_combined['TP_OD_AF_KL_ONLINE'] = (df_online_n['NB O&D GROUPE AF KL'] / df_online_n['NB O&D INDUSTRIE']).round(2)
+
+    # Calcul des évolutions TP CA et TP OD
+    df_rr_combined['EVOL_TP_CA'] = (df_rr_combined['TP_CA_AF_KL'] - df_rr_combined['TP_CA_AF_KL_N_1']).round(2)
+    df_rr_combined['EVOL_TP_OD'] = (df_rr_combined['TP_OD_AF_KL'] - df_rr_combined['TP_OD_AF_KL_N_1']).round(2)
+
+    #### CUMULS
+
+    # Calculer les cumuls de janvier jusqu'au mois dernier pour 'CA TOTAL INDUSTRIE', 'CA GROUPE AF KL', etc.
+    df_cumul = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] <= prev_month)]
+    # Grouper par 'O&D' pour calculer les cumuls, sans écraser les colonnes existantes
+    df_cumul_grouped = df_cumul.groupby('O&D').agg({
+        'CA TOTAL INDUSTRIE': 'sum',
+        'CA GROUPE AF KL': 'sum',
+        'NB O&D GROUPE AF KL': 'sum',
+        'NB O&D INDUSTRIE': 'sum'
+    }).reset_index()
+
+    # Renommer les colonnes pour indiquer qu'il s'agit des cumuls
+    df_cumul_grouped.rename(columns={
+        'CA TOTAL INDUSTRIE': 'cumul_CA_TOTAL_INDUSTRIE',
+        'CA GROUPE AF KL': 'cumul_CA_GROUPE_AF_KL',
+        'NB O&D GROUPE AF KL': 'cumul_NB_O&D_GROUPE_AF_KL',
+        'NB O&D INDUSTRIE': 'cumul_NB_O&D_INDUSTRIE'
+    }, inplace=True)
+
+    # Calcul des ratios TP_CA et TP_OD pour les cumuls
+    df_cumul_grouped['cumul_TP_CA_AF_KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'] / df_cumul_grouped['cumul_CA_TOTAL_INDUSTRIE']).round(2)
+    df_cumul_grouped['cumul_TP_OD_AF_KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'] / df_cumul_grouped['cumul_NB_O&D_INDUSTRIE']).round(2)
+
+    # Calcul des cumuls RR pour 'CA TOTAL INDUSTRIE' et 'NB O&D INDUSTRIE'
+    df_cumul_grouped['cumul_RR_CA TOTAL INDUSTRIE'] = (df_cumul_grouped['cumul_CA_TOTAL_INDUSTRIE'].pct_change() * 100).round(2)
+    df_cumul_grouped['cumul_RR_NB O&D INDUSTRIE'] = (df_cumul_grouped['cumul_NB_O&D_INDUSTRIE'].pct_change() * 100).round(2)
+
+    # Calcul des cumuls RR pour 'CA GROUPE AF KL' et 'NB O&D GROUPE AF KL'
+    df_cumul_grouped['cumul_RR_CA GROUPE AF KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'].pct_change() * 100).round(2)
+    df_cumul_grouped['cumul_RR_NB O&D GROUPE AF KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'].pct_change() * 100).round(2)
+
+    # Calcul des cumuls TP_CA_AF_KL et TP_OD_AF_KL pour les transactions "Online"
+    df_online_cumul = df_online_grouped[(df_online_grouped['YEAR'] == current_year) & (df_online_grouped['MONTH'] < current_month)]
+    df_online_cumul_grouped = df_online_cumul.groupby('O&D').agg({
+        'CA TOTAL INDUSTRIE': 'sum',
+        'CA GROUPE AF KL': 'sum',
+        'NB O&D GROUPE AF KL': 'sum',
+        'NB O&D INDUSTRIE': 'sum'
+    }).reset_index()
+
+    df_online_cumul_grouped['cumul_TP_CA_AF_KL_ONLINE'] = (df_online_cumul_grouped['CA GROUPE AF KL'] / df_online_cumul_grouped['CA TOTAL INDUSTRIE']).round(2)
+    df_online_cumul_grouped['cumul_TP_OD_AF_KL_ONLINE'] = (df_online_cumul_grouped['NB O&D GROUPE AF KL'] / df_online_cumul_grouped['NB O&D INDUSTRIE']).round(2)
+
+    # Vérification de l'année en cours et du mois précédent
+    current_year = pd.Timestamp.now().year
+    current_month = pd.Timestamp.now().month
+
+    # Calcul du mois précédent
+    if current_month == 1:
+        prev_month = 12  # Si c'est janvier, on passe à décembre
+        prev_year = current_year - 1  # Et on soustrait 1 année
+    else:
+        prev_month = current_month - 1
+        prev_year = current_year  # Pas de changement d'année si on est après janvier
+
+    # Vérification de l'année N-1 pour les cumuls
+    cumul_prev_year = current_year - 1  # Année N-1 pour les cumuls de janvier à mois courant N-1
+
+    # Filtrer les données du mois N (mois dernier) et N-1 (même mois, année précédente)
+    df_n = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] == prev_month)]
+    df_n_1 = df_grouped[(df_grouped['YEAR'] == prev_year) & (df_grouped['MONTH'] == prev_month)]
+
+    # Filtrer les données pour les cumuls de janvier à mois courant de l'année N-1
+    df_cumul_n_1 = df_grouped[(df_grouped['YEAR'] == cumul_prev_year) & (df_grouped['MONTH'] <= prev_month)]
+
+    # Grouper les données pour calculer les cumuls par O&D pour N-1
+    df_cumul_n_1_grouped = df_cumul_n_1.groupby('O&D').agg({
+        'CA TOTAL INDUSTRIE': 'sum',
+        'CA GROUPE AF KL': 'sum',
+        'NB O&D GROUPE AF KL': 'sum',
+        'NB O&D INDUSTRIE': 'sum'
+    }).reset_index()
+
+    # Calculer le cumul TP_CA_AF_KL et TP_OD_AF_KL par O&D pour l'année N-1
+    df_cumul_grouped['cumul_TP_CA_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(
+        df_cumul_n_1_grouped.set_index('O&D').apply(
+            lambda row: (row['CA GROUPE AF KL'] / row['CA TOTAL INDUSTRIE']).round(2) if row[
+                                                                                             'CA TOTAL INDUSTRIE'] > 0 else 0,
+            axis=1
+        )
+    )
+
+    df_cumul_grouped['cumul_TP_OD_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(
+        df_cumul_n_1_grouped.set_index('O&D').apply(
+            lambda row: (row['NB O&D GROUPE AF KL'] / row['NB O&D INDUSTRIE']).round(2) if row[
+                                                                                               'NB O&D INDUSTRIE'] > 0 else 0,
+            axis=1
+        )
+    )
+
+    # Calcul des cumuls EVOL_TP_CA et EVOL_TP_OD en utilisant les cumuls
+    df_cumul_grouped['cumul_EVOL_TP_CA'] = (
+            df_cumul_grouped['cumul_TP_CA_AF_KL'] - df_cumul_grouped['cumul_TP_CA_AF_KL_N_1']
+    ).round(2)
+
+    df_cumul_grouped['cumul_EVOL_TP_OD'] = (
+            df_cumul_grouped['cumul_TP_OD_AF_KL'] - df_cumul_grouped['cumul_TP_OD_AF_KL_N_1']
+    ).round(2)
+    # Joindre les résultats "Online" à df_cumul_grouped sans écraser les colonnes
+    df_cumul_grouped = df_cumul_grouped.join(df_online_cumul_grouped.set_index('O&D')[['cumul_TP_CA_AF_KL_ONLINE', 'cumul_TP_OD_AF_KL_ONLINE']], on='O&D')
+
+    # Fusionner les résultats de RR, TP et cumuls avec df_rr_combined sans écraser les colonnes
+    df_final = df_rr_combined.join(df_cumul_grouped.set_index('O&D'), on='O&D')
+
+    # Sauvegarder le fichier final avec RR, ratios et cumuls
+    df_final.to_csv(f"csv/res/grouped_flight_with_rr_{id_soc}.csv")
+
+
+def merge_rr(id_soc):
+    import pandas as pd
+
+    # Load grouped_flight_rr and filtered_flight datasets
+    grouped_flight_rr = pd.read_csv(f'csv/res/grouped_flight_with_rr_{id_soc}.csv')
+
+    # Initialize new columns for the required details
+    grouped_flight_rr['HAUL_TYPE'] = None
+    grouped_flight_rr['ORIGIN_AREA'] = None
+    grouped_flight_rr['ANNEX_C'] = None
+    grouped_flight_rr['LABEL_ORIGIN'] = None
+    grouped_flight_rr['LABEL_DESTINATION'] = None
+    grouped_flight_rr['COUNTRY_OF_DEST'] = None  # New column for 'Label country of destination'
+
+    # Use .loc to match and assign all requested columns where O&D matches CONCATENATED_CITIES
+    for idx in grouped_flight_rr.index:
+        od_value = grouped_flight_rr.loc[idx, 'O&D']
+        match = airports_df.loc[airports_df['O&D restitué'] == od_value]
+
+        if not match.empty:
+            grouped_flight_rr.loc[idx, 'HAUL_TYPE'] = match['Haul type'].values[0]
+            grouped_flight_rr.loc[idx, 'ORIGIN_AREA'] = match['Origin area'].values[0]
+            grouped_flight_rr.loc[idx, 'ANNEX_C'] = match['Annex C/ Out of Annex C 2023'].values[0]
+            grouped_flight_rr.loc[idx, 'LABEL_ORIGIN'] = match['Label cities of origin'].values[0]
+            grouped_flight_rr.loc[idx, 'LABEL_DESTINATION'] = match['Label cities of destination'].values[0]
+            grouped_flight_rr.loc[idx, 'COUNTRY_OF_DEST'] = match['Country code of destination'].values[0]
+
+
+    # Split 'O&D' into 'ORI' and 'DEST'
+    grouped_flight_rr[['ORI', 'DEST']] = grouped_flight_rr['O&D'].str.split(n=1, expand=True)
+
+    # Réorganiser les colonnes selon l'ordre spécifié
+    columns_order = [
+        'O&D', 'ANNEX_C', 'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION','COUNTRY_OF_DEST',
+        'HAUL_TYPE', 'ORIGIN_AREA', 'CA TOTAL INDUSTRIE_N', 'RR_CA TOTAL INDUSTRIE',
+        'NB O&D INDUSTRIE_N', 'RR_NB O&D INDUSTRIE', 'CA GROUPE AF KL_N', 'RR_CA GROUPE AF KL',
+        'NB O&D GROUPE AF KL_N', 'RR_NB O&D GROUPE AF KL', 'TP_CA_AF_KL', 'TP_CA_AF_KL_ONLINE',
+        'EVOL_TP_CA', 'TP_OD_AF_KL', 'TP_OD_AF_KL_ONLINE', 'EVOL_TP_OD', 'cumul_CA_TOTAL_INDUSTRIE',
+        'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE', 'cumul_RR_NB O&D INDUSTRIE',
+        'cumul_CA_GROUPE_AF_KL', 'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
+        'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE',
+        'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
+    ]
+
+    # Réorganiser les colonnes dans l'ordre spécifié
+    grouped_flight_rr = grouped_flight_rr[columns_order]
+
+    # Sauvegarder le DataFrame final
+    grouped_flight_rr.to_csv(f'csv/res/grouped_flight_full_{id_soc}.csv', index=False)
+
+import numpy as np
+
+def action_csv(id_soc):
+    rr_df = pd.read_csv(f"csv/res/grouped_flight_with_rr_{id_soc}.csv")
+    full_df = pd.read_csv(f"csv/res/grouped_flight_full_{id_soc}.csv")
+
+    rr_df['ANNEX_C'] = rr_df['O&D'].map(
+        full_df.set_index('O&D')['ANNEX_C'])
+
+    # Save the updated DataFrame with the 'ANNEX_C' column added
+    output_path = 'csv/res/temp.csv'
+    rr_df.to_csv(output_path, index=False)
+
+    # Split by 'ANNEX_C'
+    grouped = rr_df.groupby('ANNEX_C')
+
+    # Prepare lists to store results
+    result_dfs = []
+
+    # Loop over each group (each ANNEX_C)
+    for annex_c, group_df in grouped:
+        # Calculate the sum for all numerical columns except RR, TP, and EVOL
+        totals = group_df[
+            ['CA TOTAL INDUSTRIE_N', 'CA GROUPE AF KL_N', 'NB O&D GROUPE AF KL_N', 'NB O&D INDUSTRIE_N']].sum()
+
+        # Avoid divide by zero by checking for zero totals
+        if totals['CA TOTAL INDUSTRIE_N'] == 0:
+            rr_ca_total_industrie = np.nan
+            tp_ca_af_kl = np.nan
+        else:
+            rr_ca_total_industrie = (
+                        ((totals['CA TOTAL INDUSTRIE_N']) / (totals['CA TOTAL INDUSTRIE_N']) - 1) * 100).round(2)
+            tp_ca_af_kl = (totals['CA GROUPE AF KL_N'] / totals['CA TOTAL INDUSTRIE_N']).round(2)
+
+        if totals['NB O&D INDUSTRIE_N'] == 0:
+            rr_nb_od_industrie = np.nan
+            tp_od_af_kl = np.nan
+        else:
+            rr_nb_od_industrie = (((totals['NB O&D INDUSTRIE_N']) / (totals['NB O&D INDUSTRIE_N']) - 1) * 100).round(2)
+            tp_od_af_kl = (totals['NB O&D GROUPE AF KL_N'] / totals['NB O&D INDUSTRIE_N']).round(2)
+
+        # Calculate RR for CA GROUPE AF KL and NB O&D GROUPE AF KL
+        if totals['CA GROUPE AF KL_N'] != 0:
+            rr_ca_groupe_af_kl = (((totals['CA GROUPE AF KL_N']) / (totals['CA GROUPE AF KL_N']) - 1) * 100).round(2)
+        else:
+            rr_ca_groupe_af_kl = np.nan
+
+        if totals['NB O&D GROUPE AF KL_N'] != 0:
+            rr_nb_od_groupe_af_kl = (
+                        ((totals['NB O&D GROUPE AF KL_N']) / (totals['NB O&D GROUPE AF KL_N']) - 1) * 100).round(2)
+        else:
+            rr_nb_od_groupe_af_kl = np.nan
+
+        # Evolution (change from previous period)
+        # For the current example, assuming we're evolving from previous period values stored in columns or other logic
+        evol_tp_ca = np.nan if tp_ca_af_kl is np.nan else tp_ca_af_kl  # Replace with actual logic
+        evol_tp_od = np.nan if tp_od_af_kl is np.nan else tp_od_af_kl  # Replace with actual logic
+
+        # Create a new DataFrame for this ANNEX_C group
+        result_df = pd.DataFrame({
+            'ANNEX_C': [annex_c],
+            'Total_CA_TOTAL_INDUSTRIE': [totals['CA TOTAL INDUSTRIE_N']],
+            'Total_CA_GROUPE_AF_KL': [totals['CA GROUPE AF KL_N']],
+            'Total_NB_O&D_GROUPE_AF_KL': [totals['NB O&D GROUPE AF KL_N']],
+            'Total_NB_O&D_INDUSTRIE': [totals['NB O&D INDUSTRIE_N']],
+            'RR_CA_TOTAL_INDUSTRIE': [rr_ca_total_industrie],
+            'RR_CA_GROUPE_AF_KL': [rr_ca_groupe_af_kl],
+            'RR_NB_O&D_GROUPE_AF_KL': [rr_nb_od_groupe_af_kl],
+            'RR_NB_O&D_INDUSTRIE': [rr_nb_od_industrie],
+            'TP_CA_AF_KL': [tp_ca_af_kl],
+            'TP_OD_AF_KL': [tp_od_af_kl],
+            'EVOL_TP_CA': [evol_tp_ca],
+            'EVOL_TP_OD': [evol_tp_od]
+        })
+
+        # Append the result for this group to the list
+        result_dfs.append(result_df)
+
+    # Concatenate all the result DataFrames into a single DataFrame
+    final_df = pd.concat(result_dfs, ignore_index=True)
+
+    # Save the result to a CSV file
+    final_df.to_csv(f'csv/res/grouped_flight_annex_totals_{id_soc}.csv', index=False)
+
 
 
