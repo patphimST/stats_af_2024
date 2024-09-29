@@ -899,6 +899,12 @@ def calculate_rr_flight(id_soc) :
     df_rr_combined['TP_CA_AF_KL_N_1'] = (df_n_1['CA GROUPE AF KL'] / df_n_1['CA TOTAL INDUSTRIE']).round(2)
     df_rr_combined['TP_OD_AF_KL_N_1'] = (df_n_1['NB O&D GROUPE AF KL'] / df_n_1['NB O&D INDUSTRIE']).round(2)
 
+    # Calcul des nouvelles colonnes pour "Online"
+    df_rr_combined['CA_AF_KL_ONLINE'] = df_online_n['CA GROUPE AF KL'].fillna(0)
+    df_rr_combined['OD_AF_KL_ONLINE'] = df_online_n['NB O&D GROUPE AF KL'].fillna(0)
+    df_rr_combined['CA_INDUSTRIE_ONLINE'] = df_online_n['CA TOTAL INDUSTRIE'].fillna(0)
+    df_rr_combined['OD_INDUSTRIE_ONLINE'] = df_online_n['NB O&D INDUSTRIE'].fillna(0)
+
     # Calcul des ratios "Online"
     df_rr_combined['TP_CA_AF_KL_ONLINE'] = (df_online_n['CA GROUPE AF KL'] / df_online_n['CA TOTAL INDUSTRIE']).round(2)
     df_rr_combined['TP_OD_AF_KL_ONLINE'] = (df_online_n['NB O&D GROUPE AF KL'] / df_online_n['NB O&D INDUSTRIE']).round(2)
@@ -1078,7 +1084,7 @@ def split_final(id_soc):
         'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE', 'cumul_RR_NB O&D INDUSTRIE',
         'cumul_CA_GROUPE_AF_KL', 'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
         'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE',
-        'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
+        'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL', 'cumul_TP_OD_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
     ]
 
     # Split the DataFrame based on the 'ANNEX_C' column
@@ -1133,14 +1139,19 @@ def aggreg_train(id_soc):
     df_metro = df_metro.reindex(columns=columns_order)
 
     # Save the results to new CSV files
-    df_euro.to_csv(f"csv/OK/aggreg_rail_euro.@csv", index=False)
+    df_euro.to_csv(f"csv/OK/aggreg_rail_euro.csv", index=False)
     df_metro.to_csv(f"csv/OK/aggreg_rail_metro.csv", index=False)
 
     print("Reorganization and saving completed for both df_euro and df_metro.")
 
 import pandas as pd
 
+import pandas as pd
+
+import pandas as pd
+
 def calculate_rr_train(id_soc, df_name):
+    # Load the CSV file into a DataFrame
     df = pd.read_csv(f'csv/res/train/grouped_train_{df_name}_{id_soc}.csv')
 
     # Check if the DataFrame is empty
@@ -1202,6 +1213,15 @@ def calculate_rr_train(id_soc, df_name):
     df_aggregated = pd.merge(df_aggregated, df_jan_to_prev_month_n, on=group_columns, how='outer')
     df_aggregated = pd.merge(df_aggregated, df_jan_to_prev_month_n_1, on=group_columns, how='outer')
 
+    # Round non-RR columns to integers
+    cols_to_round = [
+        'CA_last_month_N', 'OD_last_month_N',
+        'CA_last_month_N_1', 'OD_last_month_N_1',
+        'CA_jan_to_last_month_N', 'OD_jan_to_last_month_N',
+        'CA_jan_to_last_month_N_1', 'OD_jan_to_last_month_N_1'
+    ]
+    df_aggregated[cols_to_round] = df_aggregated[cols_to_round].round(0)
+
     # Calculate the Rate of Change (RR) for CA and O&D
     df_aggregated['RR_CA'] = (((df_aggregated['CA_last_month_N'] / df_aggregated['CA_last_month_N_1']) - 1) * 100).round(2)
     df_aggregated['RR_OD'] = (((df_aggregated['OD_last_month_N'] / df_aggregated['OD_last_month_N_1']) - 1) * 100).round(2)
@@ -1210,21 +1230,172 @@ def calculate_rr_train(id_soc, df_name):
     df_aggregated['RR_CA_CUMUL'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated['CA_jan_to_last_month_N_1']) - 1) * 100).round(2)
     df_aggregated['RR_OD_CUMUL'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated['OD_jan_to_last_month_N_1']) - 1) * 100).round(2)
 
-    # Fill NaN values with 0 in the resulting columns
-    df_aggregated[['RR_CA', 'RR_OD', 'RR_CA_CUMUL', 'RR_OD_CUMUL']] = df_aggregated[['RR_CA', 'RR_OD', 'RR_CA_CUMUL', 'RR_OD_CUMUL']].fillna(0).round(2)
+    # Calculate the total values for each metric
+    total_values = df_aggregated[cols_to_round].sum()
 
-    # Reorganize the columns
-    columns_order = [
-        'O&D', 'CODE ORIGINE', 'CODE DESTINATION', 'LIBELLE ORIGINE', 'LIBELLE DESTINATION',
-        'CA_last_month_N', 'RR_CA', 'OD_last_month_N', 'RR_OD',
-        'CA_jan_to_last_month_N', 'RR_CA_CUMUL', 'OD_jan_to_last_month_N', 'RR_OD_CUMUL'
-    ]
-    df_aggregated = df_aggregated[columns_order]
+    # Calculate the Rate of Change (RR) using total values
+    rr_od_last_month = ((total_values['OD_last_month_N'] / total_values['OD_last_month_N_1'] - 1) * 100).round(2)
+    rr_ca_last_month = ((total_values['CA_last_month_N'] / total_values['CA_last_month_N_1'] - 1) * 100).round(2)
+    rr_ca_jan_to_last_month = ((total_values['CA_jan_to_last_month_N'] / total_values['CA_jan_to_last_month_N_1'] - 1) * 100).round(2)
+    rr_od_jan_to_last_month = ((total_values['OD_jan_to_last_month_N'] / total_values['OD_jan_to_last_month_N_1'] - 1) * 100).round(2)
 
-    # Save the result to CSV
+    # Create a DataFrame for the total row
+    total_row = pd.DataFrame([{
+        'O&D': 'Total',
+        'CODE ORIGINE': '',
+        'CODE DESTINATION': '',
+        'LIBELLE ORIGINE': '',
+        'LIBELLE DESTINATION': '',
+        'CA_last_month_N': total_values['CA_last_month_N'],
+        'OD_last_month_N': total_values['OD_last_month_N'],
+        'CA_last_month_N_1': total_values['CA_last_month_N_1'],
+        'OD_last_month_N_1': total_values['OD_last_month_N_1'],
+        'CA_jan_to_last_month_N': total_values['CA_jan_to_last_month_N'],
+        'OD_jan_to_last_month_N': total_values['OD_jan_to_last_month_N'],
+        'CA_jan_to_last_month_N_1': total_values['CA_jan_to_last_month_N_1'],
+        'OD_jan_to_last_month_N_1': total_values['OD_jan_to_last_month_N_1'],
+        'RR_CA': rr_ca_last_month,
+        'RR_OD': rr_od_last_month,
+        'RR_CA_CUMUL': rr_ca_jan_to_last_month,
+        'RR_OD_CUMUL': rr_od_jan_to_last_month
+    }])
+
+    # Append the total row to the aggregated DataFrame
+    df_aggregated = pd.concat([df_aggregated, total_row], ignore_index=True)
+
+    # Save the aggregated DataFrame with the total row to CSV
     df_aggregated.to_csv(f'csv/OK/{df_name}.csv', index=False)
 
 
 
+def total(id_soc):
+    import pandas as pd
 
+    # Load the CSV file
+    file_path = f'csv/res/flight/grouped_flight_full_{id_soc}.csv'
+    df = pd.read_csv(file_path)
+
+    # Reorganize columns: move columns ending with "_N_1" to the end
+    columns_to_move = [col for col in df.columns if col.endswith('_N_1')]
+    columns_remaining = [col for col in df.columns if col not in columns_to_move]
+    new_column_order = columns_remaining + columns_to_move
+
+    # Reorganize the dataframe
+    df_reorganized = df[new_column_order]
+
+    # Calculate the totals by grouping by the column 'ANNEX_C'
+    grouped_totals = df_reorganized.groupby('ANNEX_C').sum(numeric_only=True)
+
+    # Calculate the subtotals RR for each ANNEX_C group
+    grouped_totals['RR_CA GROUPE AF KL'] = (((grouped_totals['CA GROUPE AF KL_N'] / grouped_totals['CA GROUPE AF KL_N_1']) - 1) * 100).round(2)
+    grouped_totals['RR_NB O&D GROUPE AF KL'] = (((grouped_totals['NB O&D GROUPE AF KL_N'] / grouped_totals['NB O&D GROUPE AF KL_N_1']) - 1) * 100).round(2)
+    grouped_totals['RR_CA TOTAL INDUSTRIE'] = (((grouped_totals['CA TOTAL INDUSTRIE_N'] / grouped_totals['CA TOTAL INDUSTRIE_N_1']) - 1) * 100).round(2)
+    grouped_totals['RR_NB O&D INDUSTRIE'] = (((grouped_totals['NB O&D INDUSTRIE_N'] / grouped_totals['NB O&D INDUSTRIE_N_1']) - 1) * 100).round(2)
+
+    # Calculate TP ratios for each ANNEX_C group
+    grouped_totals['TP_CA_AF_KL'] = (grouped_totals['CA GROUPE AF KL_N'] / grouped_totals['CA TOTAL INDUSTRIE_N']).round(2)
+    grouped_totals['TP_CA_AF_KL_N_1'] = (grouped_totals['CA GROUPE AF KL_N_1'] / grouped_totals['CA TOTAL INDUSTRIE_N_1']).round(2)
+    grouped_totals['TP_OD_AF_KL'] = (grouped_totals['NB O&D GROUPE AF KL_N'] / grouped_totals['NB O&D INDUSTRIE_N']).round(2)
+    grouped_totals['TP_OD_AF_KL_N_1'] = (grouped_totals['NB O&D GROUPE AF KL_N_1'] / grouped_totals['NB O&D INDUSTRIE_N_1']).round(2)
+
+    # Calculations for online sales (hypothetical logic)
+    grouped_totals['TP_CA_AF_KL_ONLINE'] = (grouped_totals['CA_AF_KL_ONLINE'] / grouped_totals['CA_INDUSTRIE_ONLINE']).round(2)
+    grouped_totals['TP_OD_AF_KL_ONLINE'] = (grouped_totals['OD_AF_KL_ONLINE'] / grouped_totals['OD_INDUSTRIE_ONLINE']).round(2)
+
+    # Evolution calculation
+    grouped_totals['EVOL_TP_CA'] = (grouped_totals['TP_CA_AF_KL'] - grouped_totals['TP_CA_AF_KL_N_1']).round(2)
+    grouped_totals['EVOL_TP_OD'] = (grouped_totals['TP_OD_AF_KL'] - grouped_totals['TP_OD_AF_KL_N_1']).round(2)
+
+    # -----------------------------------
+    # Cumulative Calculations (Prefix: 'cumul_')
+    # -----------------------------------
+
+    # RR Calculations for cumulative columns
+    grouped_totals['cumul_RR_CA GROUPE AF KL'] = (((grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_GROUPE_AF_KL_N_1']) - 1) * 100).round(2)
+    grouped_totals['cumul_RR_NB O&D GROUPE AF KL'] = (((grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_GROUPE_AF_KL_N_1']) - 1) * 100).round(2)
+    grouped_totals['cumul_RR_CA TOTAL INDUSTRIE'] = (((grouped_totals['cumul_CA_TOTAL_INDUSTRIE'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE_N_1']) - 1) * 100).round(2)
+    grouped_totals['cumul_RR_NB O&D INDUSTRIE'] = (((grouped_totals['cumul_NB_O&D_INDUSTRIE'] / grouped_totals['cumul_NB_O&D_INDUSTRIE_N_1']) - 1) * 100).round(2)
+
+    # TP Ratios for cumulative columns
+    grouped_totals['cumul_TP_CA_AF_KL'] = (grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE']).round(2)
+    grouped_totals['cumul_TP_CA_AF_KL_N_1'] = (grouped_totals['cumul_CA_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE_N_1']).round(2)
+    grouped_totals['cumul_TP_OD_AF_KL'] = (grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_INDUSTRIE']).round(2)
+    grouped_totals['cumul_TP_OD_AF_KL_N_1'] = (grouped_totals['cumul_NB_O&D_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_NB_O&D_INDUSTRIE_N_1']).round(2)
+
+    # Calculations for cumulative online sales (hypothetical logic)
+    grouped_totals['cumul_TP_CA_AF_KL_ONLINE'] = ((grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE']) * 100).round(2)
+    grouped_totals['cumul_TP_OD_AF_KL_ONLINE'] = ((grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_INDUSTRIE']) * 100).round(2)
+
+    # Evolution calculation for cumulative values
+    grouped_totals['cumul_EVOL_TP_CA'] = (grouped_totals['cumul_TP_CA_AF_KL'] - grouped_totals['cumul_TP_CA_AF_KL_N_1']).round(2)
+    grouped_totals['cumul_EVOL_TP_OD'] = (grouped_totals['cumul_TP_OD_AF_KL'] - grouped_totals['cumul_TP_OD_AF_KL_N_1']).round(2)
+
+    # Save the results in a new CSV file
+    output_path = 'csv/res/grouped_totals_flight.csv'
+    grouped_totals.to_csv(output_path)
+
+    columns_to_retain = [
+        'CA TOTAL INDUSTRIE_N', 'RR_CA TOTAL INDUSTRIE',
+        'NB O&D INDUSTRIE_N', 'RR_NB O&D INDUSTRIE', 'CA GROUPE AF KL_N',
+        'RR_CA GROUPE AF KL', 'NB O&D GROUPE AF KL_N', 'RR_NB O&D GROUPE AF KL',
+        'TP_CA_AF_KL', 'TP_CA_AF_KL_ONLINE', 'EVOL_TP_CA', 'TP_OD_AF_KL',
+        'TP_OD_AF_KL_ONLINE', 'EVOL_TP_OD', 'cumul_CA_TOTAL_INDUSTRIE',
+        'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE',
+        'cumul_RR_NB O&D INDUSTRIE', 'cumul_CA_GROUPE_AF_KL',
+        'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
+        'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL',
+        'cumul_TP_CA_AF_KL_ONLINE', 'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL',
+        'cumul_TP_OD_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
+    ]
+
+    # Reorder and retain only the specified columns
+    grouped_totals = grouped_totals[columns_to_retain]
+
+    # Save the results in a new CSV file
+    output_path = 'csv/OK/totals_flight.csv'
+    grouped_totals.to_csv(output_path)
+
+    print(f"Total calculations saved to {output_path}")
+
+def merge_total_flight(id_soc):
+    # Charger les données de `totals_flight.csv`
+    totals_flight_path = 'csv/OK/totals_flight.csv'
+    totals_flight = pd.read_csv(totals_flight_path)
+
+    # Charger le fichier CSV approprié en fonction de la valeur de `ANNEX_C`
+    for annex_c_value in totals_flight['ANNEX_C'].unique():
+        # Charger le fichier correspondant à la valeur de ANNEX_C
+        file_name = f"csv/OK/{annex_c_value}.csv"
+        df_annex = pd.read_csv(file_name)
+
+        # Filtrer la ligne dans totals_flight pour cette valeur de 'ANNEX_C'
+        row_to_append = totals_flight[totals_flight['ANNEX_C'] == annex_c_value]
+
+        if not row_to_append.empty:
+            # Garder uniquement les colonnes à partir de 'ORIGIN_AREA'
+            try:
+                start_column_index = df_annex.columns.get_loc('ORIGIN_AREA')
+            except KeyError:
+                print(f"'ORIGIN_AREA' non trouvé dans les colonnes de {file_name}")
+                continue
+
+            columns_to_append = df_annex.columns[start_column_index:]
+
+            # Trouver l'intersection des colonnes à ajouter avec les colonnes disponibles dans row_to_append
+            columns_to_append = [col for col in columns_to_append if col in row_to_append.columns]
+
+            if not columns_to_append:
+                print(f"Aucune colonne correspondante trouvée pour ANNEX_C {annex_c_value} dans totals_flight")
+                continue
+
+            # S'assurer que seules les colonnes appropriées sont utilisées pour l'ajout
+            row_to_append = row_to_append[columns_to_append]
+
+            # Ajouter la ligne filtrée au DataFrame
+            df_annex = pd.concat([df_annex, row_to_append], ignore_index=True)
+
+            # Sauvegarder le DataFrame mis à jour dans le fichier CSV
+            df_annex.to_csv(file_name, index=False)
+
+            print(f"Ligne ajoutée au fichier {file_name}")
 
