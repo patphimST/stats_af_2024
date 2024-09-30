@@ -142,27 +142,53 @@ def concatenate_cities(row):
         ori_country = row.get('0_Ori_country_NDC', '')
         des_country = row.get('0_Des_country_NDC', '')
 
-    # Maintenant, appliquer les règles en fonction des valeurs actuelles
+    special_cities = ['PAR', 'BIO', 'BRU', 'FRA', 'GVA', 'LUX']
+
+    # Gérer le cas où PAR est dans ori_city ou des_city
     if 'PAR' in [ori_city, des_city]:
+        if ori_city == 'PAR':
+            ori_city, des_city = 'PAR', des_city
+        elif des_city == 'PAR':
+            ori_city, des_city = 'PAR', ori_city
+
         if number_of_legs <= 2:
-            return f"PAR {des_city}" if ori_city == 'PAR' else f"PAR {ori_city}"
+            return f"{ori_city} {des_city}"
         else:
-            return f"PAR {des_city} !!!" if ori_city == 'PAR' else f"PAR {ori_city} !!!"
+            return f"{ori_city} {des_city} !!!"
+
+    # Gérer les autres villes spéciales (BIO, BRU, FRA, GVA, LUX)
+    elif ori_city in special_cities or des_city in special_cities:
+        # Trier par ordre alphabétique si une des villes spéciales est présente
+        sorted_cities = sorted([ori_city, des_city])
+        if number_of_legs <= 2:
+            return f"{sorted_cities[0]} {sorted_cities[1]}"
+        else:
+            return f"{sorted_cities[0]} {sorted_cities[1]} !!!"
+
+    # Gérer le cas où l'origine et la destination sont en France
     elif ori_country == 'FR' and des_country == 'FR':
+        sorted_cities = sorted([ori_city, des_city])
         if number_of_legs <= 2:
-            return f"{sorted([ori_city, des_city])[0]} {sorted([ori_city, des_city])[1]}"
+            return f"{sorted_cities[0]} {sorted_cities[1]}"
         else:
-            return f"{sorted([ori_city, des_city])[0]} {sorted([ori_city, des_city])[1]} !!!"
+            return f"{sorted_cities[0]} {sorted_cities[1]} !!!"
+
+    # Gérer le cas où l'origine et la destination ne sont pas en France
     elif ori_country != 'FR' and des_country != 'FR':
+        sorted_cities = sorted([ori_city, des_city])
         if number_of_legs <= 2:
-            return f"{sorted([ori_city, des_city])[0]} {sorted([ori_city, des_city])[1]}"
+            return f"{sorted_cities[0]} {sorted_cities[1]}"
         else:
-            return f"{sorted([ori_city, des_city])[0]} {sorted([ori_city, des_city])[1]} !!!"
+            return f"{sorted_cities[0]} {sorted_cities[1]} !!!"
+
+    # Gérer le cas où l'origine est en France et la destination est à l'étranger
     elif ori_country == 'FR' and des_country != 'FR':
         if number_of_legs <= 2:
             return f"{ori_city} {des_city}"
         else:
             return f"{ori_city} {des_city} !!!"
+
+    # Gérer le cas où l'origine est à l'étranger et la destination est en France
     elif ori_country != 'FR' and des_country == 'FR':
         if number_of_legs <= 2:
             return f"{des_city} {ori_city}"
@@ -184,6 +210,10 @@ def lookup_airport_details(concatenated_city):
     # Find the matching row where 'O&D restitué' matches the given concatenated_city
     match_row = airports_df[airports_df['O&D restitué'] == concatenated_city]
 
+    # If no match found, try to find in 'O&D Inbound'
+    if match_row.empty:
+        match_row = airports_df[airports_df['O&D Inbound'] == concatenated_city]
+
     if not match_row.empty:
         # Extract values for each field if a match is found
         haul_type = match_row['Haul type'].values[0]
@@ -191,10 +221,10 @@ def lookup_airport_details(concatenated_city):
         annex_c = match_row['Annex C/ Out of Annex C 2023'].values[0]
         label_origin = match_row['Label cities of origin'].values[0]
         label_destination = match_row['Label cities of destination'].values[0]
-        label_country_destination = match_row['Label country of destination'].values[0]  # Add this line
+        od_restitue = match_row['O&D restitué'].values[0]  # Add the 'O&D restitué' column value
 
         # Return all the extracted values
-        return haul_type, origin_area, annex_c, label_origin, label_destination, label_country_destination
+        return haul_type, origin_area, annex_c, label_origin, label_destination, od_restitue
 
     # Return empty strings if no match is found
     return "", "", "", "", "", ""
@@ -318,12 +348,6 @@ def get_items_flight(id_soc, start_date):
                                         'Airport origin code',
                                         'Country code of Origine') if row[des_country_col] == 'NDC' else '', axis=1)
 
-    # Appliquer la fonction concatenate_cities à chaque ligne du DataFrame
-    df['CONCATENATED_CITIES'] = df.apply(concatenate_cities, axis=1)
-
-    # Rechercher les détails supplémentaires dans 'airports_df' pour 'CONCATENATED_CITIES'
-    df[['HAUL_TYPE', 'ORIGIN_AREA', 'ANNEX_C', 'LABEL_ORIGIN', 'LABEL_DESTINATION']] = df.apply(
-        lambda row: pd.Series(lookup_airport_details(row['CONCATENATED_CITIES'])), axis=1)
 
     # Concaténer les colonnes qui terminent par 'governing_carrier' pour créer CONCAT_carrier
     df['CONCAT_carrier'] = df.apply(concatenate_carriers, axis=1)
@@ -334,34 +358,44 @@ def get_items_flight(id_soc, start_date):
     # Sauvegarder le DataFrame en CSV
     df.to_csv(f"csv/base/items_flight_{id_soc}.csv", index=False)
 
+import pandas as pd
+
 def merge_extract_flight(id_soc):
+    # Charger les fichiers CSV de vol et fusionner
     df0 = pd.read_csv(f"csv/base/bills_{id_soc}.csv")
     df0 = df0[df0["type"] == "flight"]
     df1 = pd.read_csv(f"csv/base/items_flight_{id_soc}.csv")
     df = pd.merge(df0, df1, on='ITEM_ID', how='inner')
 
-    # Convert CREATED_AT to YYYY-MM and YYYY formats
+    # Convertir CREATED_AT en formats YYYY-MM et YYYY
     df['ISSUED_MONTH'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y%m')
     df['ODLIST'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y')
 
-    df.to_csv(f"csv/res/flight/merge_flight_{id_soc}.csv")
+    # Appliquer la fonction concatenate_cities à chaque ligne du DataFrame
+    df['CONCATENATED_CITIES'] = df.apply(concatenate_cities, axis=1)
 
+    # Rechercher les détails supplémentaires dans 'airports_df' pour 'CONCATENATED_CITIES'
+    df[['HAUL_TYPE', 'ORIGIN_AREA', 'ANNEX_C', 'LABEL_ORIGIN', 'LABEL_DESTINATION','O&D RESTITUE']] = df.apply(
+        lambda row: pd.Series(lookup_airport_details(row['CONCATENATED_CITIES'])), axis=1)
 
     columns_to_keep = [
-        'ITEM_ID', 'type_bill','ISSUED_MONTH', 'ODLIST', 'IS_OFFLINE','TOTAL_BILLED',
+        'ITEM_ID', 'type_bill', 'ISSUED_MONTH', 'ODLIST', 'IS_OFFLINE', 'TOTAL_BILLED',
         'NB_LEGS', 'CONCATENATED_CITIES', 'HAUL_TYPE', 'ORIGIN_AREA', 'ANNEX_C',
-        'LABEL_ORIGIN', 'LABEL_DESTINATION', 'AIRLINE_GROUP',
+        'LABEL_ORIGIN', 'LABEL_DESTINATION', 'AIRLINE_GROUP','O&D RESTITUE'
     ]
 
     # Sélectionner uniquement les colonnes spécifiées
     df_filtered = df[columns_to_keep]
 
-    # Affichage des premières lignes pour vérifier
-    print(df_filtered.head())
+    # Trier le DataFrame par 'ODLIST'
     df_filtered = df_filtered.sort_values(by='ODLIST')
 
-    # Sauvegarde du DataFrame filtré dans un fichier CSV
+    # Sauvegarder le DataFrame filtré dans un fichier CSV
+    df_filtered.to_csv(f'csv/res/flight/raw_flight_{id_soc}.csv', index=False)
+
+    df_filtered = df_filtered[df_filtered['O&D RESTITUE'] != ""]
     df_filtered.to_csv(f'csv/res/flight/filtered_flight_{id_soc}.csv', index=False)
+
 
 def group_flight(id_soc):
     # Charger le fichier CSV téléchargé
@@ -370,7 +404,7 @@ def group_flight(id_soc):
 
     # Groupement par les colonnes spécifiées
     grouping_columns = [
-        'CONCATENATED_CITIES', 'ORIGIN_AREA', 'ANNEX_C', 'LABEL_ORIGIN',
+        'O&D RESTITUE', 'ORIGIN_AREA', 'ANNEX_C', 'LABEL_ORIGIN',
         'LABEL_DESTINATION', 'ISSUED_MONTH', 'ODLIST', 'IS_OFFLINE'
     ]
 
@@ -391,11 +425,11 @@ def group_flight(id_soc):
 
     # fichier af
 
-    df_grouped_af[['CODE ORIGINE', 'CODE DESTINATION']] = df_grouped_af['CONCATENATED_CITIES'].str.split(' ', n=1, expand=True)
+    df_grouped_af[['CODE ORIGINE', 'CODE DESTINATION']] = df_grouped_af['O&D RESTITUE'].str.split(' ', n=1, expand=True)
 
     # Renommer les colonnes
     df_grouped_af = df_grouped_af.rename(columns={
-        "CONCATENATED_CITIES" : "O&D",
+        "O&D RESTITUE" : "O&D",
         "ISSUED_MONTH": "DATE D'EMISSION",
         'ORIGIN_AREA': 'ZONE ORIGINE',
         'ANNEX_C': 'PERIMETRE',
@@ -584,10 +618,10 @@ def concat_and_remove_columns(id_soc):
     # Supprimer les colonnes inutiles
     columns_to_remove = ori_columns + des_columns + ori_locationId_columns+ des_locationId_columns
     df.drop(columns=columns_to_remove, inplace=True)
-    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+    df.to_csv(f"csv/res/train/temp_{id_soc}.csv", index=False)
 
 def normalize_station_names(id_soc):
-    df = pd.read_csv(f"csv/base/temp_{id_soc}.csv")
+    df = pd.read_csv(f"csv/res/train/temp_{id_soc}.csv")
     # Liste des colonnes à traiter
     name_columns = [col for col in df.columns if '_ori_name' in col or '_des_name' in col]
 
@@ -615,11 +649,11 @@ def normalize_station_names(id_soc):
     for col in name_columns:
         df[col] = df[col].apply(normalize_name)
 
-    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+    df.to_csv(f"csv/res/train/norm_{id_soc}.csv", index=False)
 
 def fill_missing_location_ids(id_soc):
     # Charger les fichiers CSV
-    temp_df = pd.read_csv(f"csv/base/temp_{id_soc}.csv")
+    temp_df = pd.read_csv(f"csv/res/train/norm_{id_soc}.csv")
     metropolis_df = pd.read_csv("const/O&D Metropolis rail 2024 v In&Out.csv", delimiter=";")
     european_df = pd.read_csv("const/O&D European Rail 2024 v In&Out.csv", delimiter=";")
 
@@ -670,11 +704,11 @@ def fill_missing_location_ids(id_soc):
 
     # Créer la colonne 'Zone' en appliquant la fonction determine_zone à chaque ligne
 
-    df.to_csv(f"csv/base/temp_{id_soc}.csv", index=False)
+    df.to_csv(f"csv/res/train/concat_{id_soc}.csv", index=False)
 
 def process_locations(id_soc):
     # Charger le DataFrame
-    df = pd.read_csv(f"csv/base/temp_{id_soc}.csv")
+    df = pd.read_csv(f"csv/res/train/concat_{id_soc}.csv")
     rail_metro_df = pd.read_csv('const/O&D Metropolis rail 2024 v In&Out.csv', delimiter=";")
     rail_euro_df = pd.read_csv('const/O&D European Rail 2024 v In&Out.csv', delimiter=";")
 
@@ -745,12 +779,12 @@ def process_locations(id_soc):
         df.at[idx, 'des_label'] = des_label
 
     # Sauvegarder dans deux fichiers CSV
-    df.to_csv(f"csv/base/items_train_{id_soc}.csv", index=False)
+    df.to_csv(f"csv/res/train/raw_items_train_{id_soc}.csv", index=False)
 
 def merge_extract_train(id_soc):
     df0 = pd.read_csv(f"csv/base/bills_{id_soc}.csv")
     df0 = df0[df0["type"] == "train"]
-    df1 = pd.read_csv(f"csv/base/items_train_{id_soc}.csv")
+    df1 = pd.read_csv(f"csv/res/train/raw_items_train_{id_soc}.csv")
     df = pd.merge(df0, df1, on='ITEM_ID', how='inner')
 
     # Convert CREATED_AT to YYYY-MM and YYYY formats
@@ -810,16 +844,15 @@ def clean_train(id_soc):
     # Vérifier les correspondances pour la zone 'METRO'
     metro_df = metro_df[metro_df['Zone'] == 'METRO']
     metro_df['O&D_match'] = metro_df['O&D'].isin(rail_metro_df['O&D restitué'])
-
     # Filtrer les lignes où 'O&D' a une correspondance
     filtered_metro_df = metro_df[metro_df['O&D_match']].drop(columns=['O&D_match'])
 
     # Vérifier les correspondances pour la zone 'EUROPE'
     europe_df = europe_df[europe_df['Zone'] == 'EUROPE']
     europe_df['O&D_match'] = europe_df['O&D'].isin(rail_euro_df['O&D restitué'])
-
     # Filtrer les lignes où 'O&D' a une correspondance
     filtered_europe_df = europe_df[europe_df['O&D_match']].drop(columns=['O&D_match'])
+
 
     # Saving the two DataFrames to CSV files
     filtered_metro_df.to_csv(f'csv/res/train/grouped_train_metro_{id_soc}.csv')
@@ -837,8 +870,6 @@ def calculate_rr_flight(id_soc) :
     df['YEAR'] = df['DATE D\'EMISSION'].dt.year
     df['MONTH'] = df['DATE D\'EMISSION'].dt.month
 
-    # Filtrer les données pour "Online" uniquement
-    df_online = df[df['TYPE DE VENTE'] == 'Online']
 
     # Grouper par O&D, DATE D'EMISSION
     df_grouped = df.groupby(['O&D', 'DATE D\'EMISSION']).agg({
@@ -847,6 +878,10 @@ def calculate_rr_flight(id_soc) :
         'NB O&D GROUPE AF KL': 'sum',
         'NB O&D INDUSTRIE': 'sum'
     }).reset_index()
+
+
+    # Filtrer les données pour "Online" uniquement
+    df_online = df[df['TYPE DE VENTE'] == 'Online']
 
     df_online_grouped = df_online.groupby(['O&D', 'DATE D\'EMISSION']).agg({
         'CA TOTAL INDUSTRIE': 'sum',
@@ -933,6 +968,8 @@ def calculate_rr_flight(id_soc) :
         'NB O&D INDUSTRIE': 'cumul_NB_O&D_INDUSTRIE'
     }, inplace=True)
 
+
+
     # Calcul des ratios TP_CA et TP_OD pour les cumuls
     df_cumul_grouped['cumul_TP_CA_AF_KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'] / df_cumul_grouped['cumul_CA_TOTAL_INDUSTRIE']).round(2)
     df_cumul_grouped['cumul_TP_OD_AF_KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'] / df_cumul_grouped['cumul_NB_O&D_INDUSTRIE']).round(2)
@@ -945,6 +982,7 @@ def calculate_rr_flight(id_soc) :
     df_cumul_grouped['cumul_RR_CA GROUPE AF KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'].pct_change() * 100).round(2)
     df_cumul_grouped['cumul_RR_NB O&D GROUPE AF KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'].pct_change() * 100).round(2)
 
+
     # Calcul des cumuls TP_CA_AF_KL et TP_OD_AF_KL pour les transactions "Online"
     df_online_cumul = df_online_grouped[(df_online_grouped['YEAR'] == current_year) & (df_online_grouped['MONTH'] < current_month)]
     df_online_cumul_grouped = df_online_cumul.groupby('O&D').agg({
@@ -956,6 +994,7 @@ def calculate_rr_flight(id_soc) :
 
     df_online_cumul_grouped['cumul_TP_CA_AF_KL_ONLINE'] = (df_online_cumul_grouped['CA GROUPE AF KL'] / df_online_cumul_grouped['CA TOTAL INDUSTRIE']).round(2)
     df_online_cumul_grouped['cumul_TP_OD_AF_KL_ONLINE'] = (df_online_cumul_grouped['NB O&D GROUPE AF KL'] / df_online_cumul_grouped['NB O&D INDUSTRIE']).round(2)
+
 
     # Vérification de l'année en cours et du mois précédent
     current_year = pd.Timestamp.now().year
@@ -1002,6 +1041,7 @@ def calculate_rr_flight(id_soc) :
     # Joindre les résultats "Online" à df_cumul_grouped sans écraser les colonnes
     df_cumul_grouped = df_cumul_grouped.join(df_online_cumul_grouped.set_index('O&D')[['cumul_TP_CA_AF_KL_ONLINE', 'cumul_TP_OD_AF_KL_ONLINE']], on='O&D')
 
+
     # Filtrer les données pour l'année N-1
     df_cumul_n_1 = df_grouped[(df_grouped['YEAR'] == current_year - 1) & (df_grouped['MONTH'] <= prev_month)]
 
@@ -1012,6 +1052,7 @@ def calculate_rr_flight(id_soc) :
         'NB O&D GROUPE AF KL': 'sum',
         'NB O&D INDUSTRIE': 'sum'
     }).reset_index()
+
 
     # Renommer les colonnes pour indiquer qu'il s'agit des cumuls N-1
     df_cumul_n_1_grouped.rename(columns={
@@ -1025,10 +1066,12 @@ def calculate_rr_flight(id_soc) :
     df_cumul_grouped = df_cumul_grouped.merge(df_cumul_n_1_grouped.set_index('O&D'), on='O&D', how='left')
 
     # Fusionner les résultats de RR, TP et cumuls avec df_rr_combined sans écraser les colonnes
-    df_final = df_rr_combined.join(df_cumul_grouped.set_index('O&D'), on='O&D')
+    # df_final = df_rr_combined.join(df_cumul_grouped.set_index('O&D'), on='O&D')
+    df_final = pd.merge(df_rr_combined, df_cumul_grouped, on='O&D', how='outer')
 
     # Sauvegarder le fichier final avec RR, ratios et cumuls
     df_final.to_csv(f"csv/res/flight/grouped_flight_with_rr_{id_soc}.csv")
+
 
 def merge_rr(id_soc):
     import pandas as pd
@@ -1073,7 +1116,6 @@ def split_final(id_soc):
 
     # Merge df0 and df1 based on the common columns
     df = pd.merge(df0, df1, how='inner', on=[col for col in df0.columns if col in df1.columns])
-    df.to_csv("aggreg.csv")
     # Define the desired column order
     columns_order = [
         'O&D', 'ANNEX_C', 'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION', 'COUNTRY_OF_DEST',
@@ -1227,8 +1269,8 @@ def calculate_rr_train(id_soc, df_name):
     df_aggregated['RR_OD'] = (((df_aggregated['OD_last_month_N'] / df_aggregated['OD_last_month_N_1']) - 1) * 100).round(2)
 
     # Calculate the Cumulative Rate of Change (RR CUMUL) for CA and O&D
-    df_aggregated['RR_CA_CUMUL'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated['CA_jan_to_last_month_N_1']) - 1) * 100).round(2)
-    df_aggregated['RR_OD_CUMUL'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated['OD_jan_to_last_month_N_1']) - 1) * 100).round(2)
+    df_aggregated['cumul_RR_CA'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated['CA_jan_to_last_month_N_1']) - 1) * 100).round(2)
+    df_aggregated['cumul_RR_OD'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated['OD_jan_to_last_month_N_1']) - 1) * 100).round(2)
 
     # Calculate the total values for each metric
     total_values = df_aggregated[cols_to_round].sum()
@@ -1256,21 +1298,18 @@ def calculate_rr_train(id_soc, df_name):
         'OD_jan_to_last_month_N_1': total_values['OD_jan_to_last_month_N_1'],
         'RR_CA': rr_ca_last_month,
         'RR_OD': rr_od_last_month,
-        'RR_CA_CUMUL': rr_ca_jan_to_last_month,
-        'RR_OD_CUMUL': rr_od_jan_to_last_month
+        'cumul_RR_CA': rr_ca_jan_to_last_month,
+        'cumul_RR_OD': rr_od_jan_to_last_month
     }])
 
     # Append the total row to the aggregated DataFrame
     df_aggregated = pd.concat([df_aggregated, total_row], ignore_index=True)
 
     # Save the aggregated DataFrame with the total row to CSV
-    df_aggregated.to_csv(f'csv/OK/{df_name}.csv', index=False)
-
+    df_aggregated.to_csv(f'csv/OK/total_{df_name}.csv', index=False)
 
 
 def total(id_soc):
-    import pandas as pd
-
     # Load the CSV file
     file_path = f'csv/res/flight/grouped_flight_full_{id_soc}.csv'
     df = pd.read_csv(file_path)
@@ -1284,7 +1323,7 @@ def total(id_soc):
     df_reorganized = df[new_column_order]
 
     # Calculate the totals by grouping by the column 'ANNEX_C'
-    grouped_totals = df_reorganized.groupby('ANNEX_C').sum(numeric_only=True)
+    grouped_totals = df_reorganized.groupby('ANNEX_C').sum(numeric_only=True).reset_index()
 
     # Calculate the subtotals RR for each ANNEX_C group
     grouped_totals['RR_CA GROUPE AF KL'] = (((grouped_totals['CA GROUPE AF KL_N'] / grouped_totals['CA GROUPE AF KL_N_1']) - 1) * 100).round(2)
@@ -1297,10 +1336,6 @@ def total(id_soc):
     grouped_totals['TP_CA_AF_KL_N_1'] = (grouped_totals['CA GROUPE AF KL_N_1'] / grouped_totals['CA TOTAL INDUSTRIE_N_1']).round(2)
     grouped_totals['TP_OD_AF_KL'] = (grouped_totals['NB O&D GROUPE AF KL_N'] / grouped_totals['NB O&D INDUSTRIE_N']).round(2)
     grouped_totals['TP_OD_AF_KL_N_1'] = (grouped_totals['NB O&D GROUPE AF KL_N_1'] / grouped_totals['NB O&D INDUSTRIE_N_1']).round(2)
-
-    # Calculations for online sales (hypothetical logic)
-    grouped_totals['TP_CA_AF_KL_ONLINE'] = (grouped_totals['CA_AF_KL_ONLINE'] / grouped_totals['CA_INDUSTRIE_ONLINE']).round(2)
-    grouped_totals['TP_OD_AF_KL_ONLINE'] = (grouped_totals['OD_AF_KL_ONLINE'] / grouped_totals['OD_INDUSTRIE_ONLINE']).round(2)
 
     # Evolution calculation
     grouped_totals['EVOL_TP_CA'] = (grouped_totals['TP_CA_AF_KL'] - grouped_totals['TP_CA_AF_KL_N_1']).round(2)
@@ -1322,51 +1357,53 @@ def total(id_soc):
     grouped_totals['cumul_TP_OD_AF_KL'] = (grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_INDUSTRIE']).round(2)
     grouped_totals['cumul_TP_OD_AF_KL_N_1'] = (grouped_totals['cumul_NB_O&D_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_NB_O&D_INDUSTRIE_N_1']).round(2)
 
-    # Calculations for cumulative online sales (hypothetical logic)
-    grouped_totals['cumul_TP_CA_AF_KL_ONLINE'] = ((grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE']) * 100).round(2)
-    grouped_totals['cumul_TP_OD_AF_KL_ONLINE'] = ((grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_INDUSTRIE']) * 100).round(2)
-
     # Evolution calculation for cumulative values
     grouped_totals['cumul_EVOL_TP_CA'] = (grouped_totals['cumul_TP_CA_AF_KL'] - grouped_totals['cumul_TP_CA_AF_KL_N_1']).round(2)
     grouped_totals['cumul_EVOL_TP_OD'] = (grouped_totals['cumul_TP_OD_AF_KL'] - grouped_totals['cumul_TP_OD_AF_KL_N_1']).round(2)
 
-    # Save the results in a new CSV file
-    output_path = 'csv/res/grouped_totals_flight.csv'
-    grouped_totals.to_csv(output_path)
+    # Calculate global total across all 'ANNEX_C' groups for numeric columns
+    global_totals_sum = grouped_totals.sum(numeric_only=True)
 
-    columns_to_retain = [
-        'CA TOTAL INDUSTRIE_N', 'RR_CA TOTAL INDUSTRIE',
-        'NB O&D INDUSTRIE_N', 'RR_NB O&D INDUSTRIE', 'CA GROUPE AF KL_N',
-        'RR_CA GROUPE AF KL', 'NB O&D GROUPE AF KL_N', 'RR_NB O&D GROUPE AF KL',
-        'TP_CA_AF_KL', 'TP_CA_AF_KL_ONLINE', 'EVOL_TP_CA', 'TP_OD_AF_KL',
-        'TP_OD_AF_KL_ONLINE', 'EVOL_TP_OD', 'cumul_CA_TOTAL_INDUSTRIE',
-        'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE',
-        'cumul_RR_NB O&D INDUSTRIE', 'cumul_CA_GROUPE_AF_KL',
-        'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
-        'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL',
-        'cumul_TP_CA_AF_KL_ONLINE', 'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL',
-        'cumul_TP_OD_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
-    ]
+    # Recalculate TP, RR, and EVOL metrics for the global total
+    global_totals_sum['RR_CA GROUPE AF KL'] = (((global_totals_sum['CA GROUPE AF KL_N'] / global_totals_sum['CA GROUPE AF KL_N_1']) - 1) * 100).round(2)
+    global_totals_sum['RR_NB O&D GROUPE AF KL'] = (((global_totals_sum['NB O&D GROUPE AF KL_N'] / global_totals_sum['NB O&D GROUPE AF KL_N_1']) - 1) * 100).round(2)
+    global_totals_sum['RR_CA TOTAL INDUSTRIE'] = (((global_totals_sum['CA TOTAL INDUSTRIE_N'] / global_totals_sum['CA TOTAL INDUSTRIE_N_1']) - 1) * 100).round(2)
+    global_totals_sum['RR_NB O&D INDUSTRIE'] = (((global_totals_sum['NB O&D INDUSTRIE_N'] / global_totals_sum['NB O&D INDUSTRIE_N_1']) - 1) * 100).round(2)
 
-    # Reorder and retain only the specified columns
-    grouped_totals = grouped_totals[columns_to_retain]
+    global_totals_sum['TP_CA_AF_KL'] = (global_totals_sum['CA GROUPE AF KL_N'] / global_totals_sum['CA TOTAL INDUSTRIE_N']).round(2)
+    global_totals_sum['TP_CA_AF_KL_N_1'] = (global_totals_sum['CA GROUPE AF KL_N_1'] / global_totals_sum['CA TOTAL INDUSTRIE_N_1']).round(2)
+    global_totals_sum['EVOL_TP_CA'] = (global_totals_sum['TP_CA_AF_KL'] - global_totals_sum['TP_CA_AF_KL_N_1']).round(2)
+    global_totals_sum['TP_OD_AF_KL'] = (global_totals_sum['NB O&D GROUPE AF KL_N'] / global_totals_sum['NB O&D INDUSTRIE_N']).round(2)
+    global_totals_sum['TP_OD_AF_KL_N_1'] = (global_totals_sum['NB O&D GROUPE AF KL_N_1'] / global_totals_sum['NB O&D INDUSTRIE_N_1']).round(2)
+    global_totals_sum['EVOL_TP_OD'] = (global_totals_sum['TP_OD_AF_KL'] - global_totals_sum['TP_OD_AF_KL_N_1']).round(2)
 
-    # Save the results in a new CSV file
+    # Add a row for the global total
+
+    global_totals_sum = grouped_totals.sum(numeric_only=True)
+    global_totals_sum['ANNEX_C'] = 'Total GLOBAL'  # Add the "Total GLOBAL" value to the "ANNEX_C" column
+
+    # Convert global_totals_sum to DataFrame and append it to the existing DataFrame
+    global_totals_sum_df = pd.DataFrame(global_totals_sum).T
+    grouped_totals = pd.concat([grouped_totals, global_totals_sum_df], ignore_index=True)
+
     output_path = 'csv/OK/totals_flight.csv'
-    grouped_totals.to_csv(output_path)
 
-    print(f"Total calculations saved to {output_path}")
+    grouped_totals.to_csv(output_path)
 
 def merge_total_flight(id_soc):
-    # Charger les données de `totals_flight.csv`
+    # Charger les 4 premières lignes de `totals_flight.csv`
     totals_flight_path = 'csv/OK/totals_flight.csv'
-    totals_flight = pd.read_csv(totals_flight_path)
+    totals_flight = pd.read_csv(totals_flight_path, nrows=4).reset_index(drop=True)
 
     # Charger le fichier CSV approprié en fonction de la valeur de `ANNEX_C`
     for annex_c_value in totals_flight['ANNEX_C'].unique():
         # Charger le fichier correspondant à la valeur de ANNEX_C
         file_name = f"csv/OK/{annex_c_value}.csv"
-        df_annex = pd.read_csv(file_name)
+        try:
+            df_annex = pd.read_csv(file_name)
+        except FileNotFoundError:
+            print(f"Fichier non trouvé : {file_name}")
+            continue
 
         # Filtrer la ligne dans totals_flight pour cette valeur de 'ANNEX_C'
         row_to_append = totals_flight[totals_flight['ANNEX_C'] == annex_c_value]
@@ -1398,4 +1435,491 @@ def merge_total_flight(id_soc):
             df_annex.to_csv(file_name, index=False)
 
             print(f"Ligne ajoutée au fichier {file_name}")
+
+from openpyxl.utils import get_column_letter
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from datetime import datetime
+from openpyxl.styles.borders import Border, Side
+
+def create_excel():
+    # Load the CSV files into DataFrames
+    iac_df = pd.read_csv('csv/OK/IAC.csv')
+    ihac_df = pd.read_csv('csv/OK/IHAC.csv')
+    mac_df = pd.read_csv('csv/OK/MAC.csv')
+    mhac_df = pd.read_csv('csv/OK/MHAC.csv')
+
+    # Drop the "O&D" and "ANNEX_C" columns if they exist in the DataFrames
+    columns_to_exclude = ["O&D", "ANNEX_C"]
+
+    for df in [iac_df, ihac_df, mac_df, mhac_df]:
+        for column in columns_to_exclude:
+            if column in df.columns:
+                df.drop(columns=[column], inplace=True)
+
+        # Drop rows where "cumul_CA_GROUPE_AF_KL" or "cumul_NB_O&D_GROUPE_AF_KL" are empty (NaN)
+    # for df in [iac_df, ihac_df, mac_df, mhac_df]:
+    #     df.dropna(subset=["cumul_CA_GROUPE_AF_KL", "cumul_NB_O&D_GROUPE_AF_KL"], inplace=True)
+
+    # Load the existing Excel file
+    excel_path = "const/template.xlsx"
+    workbook = load_workbook(excel_path)
+
+    # Select the worksheet "Etat 1.1"
+    sheet_name = "Etat 1.1"
+    if sheet_name in workbook.sheetnames:
+        sheet = workbook[sheet_name]
+    else:
+        print(f"Sheet '{sheet_name}' does not exist in the workbook.")
+        return
+
+    # Unmerge all cells in the sheet to handle 'MergedCell' issues
+    for merged_range in list(sheet.merged_cells.ranges):
+        sheet.unmerge_cells(str(merged_range))
+
+    # Define headers to be used for each table
+    headers = [
+        "ORI", "DEST", "DESTINATION", "ORIGINE", "CODE_PAYS", "TYPE_COURRIER", "ZONE_ORIGINE",
+        "CA", "R/R", "O&D", "R/R", "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE",
+        "EVOL T/P (CA)", "T/P O&D", "T/P O&D ONLINE", "EVOL T/P (O&D)", "CA", "R/R", "O&D", "R/R",
+        "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE", "EVOL T/P (CA)", "T/P O&D",
+        "T/P O&D ONLINE", "EVOL T/P (O&D)"
+    ]
+
+    # Define styles for headers, subtotals, top labels, date information, and borders
+    header_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+    header_font = Font(bold=True, color="FFFFFF")  # White font
+    header_alignment = Alignment(horizontal="center", vertical="center")
+
+    subtotal_fill = PatternFill(start_color="5c4292", end_color="5c4292", fill_type="solid")  # Red fill for subtotals
+    subtotal_font = Font(bold=True, color="FFFFFF")  # White font for subtotals, bold
+    subtotal_alignment = Alignment(horizontal="center", vertical="center")
+
+    top_label_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+    top_label_font = Font(bold=True, color="FFFFFF")  # White font for top labels
+    top_label_alignment = Alignment(horizontal="center", vertical="center")
+
+    date_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+    date_font = Font(bold=True, color="FFFFFF")  # White font for date labels
+    date_alignment = Alignment(horizontal="center", vertical="center")
+
+    thin_border = Border(
+        left=Side(border_style="thin", color="262626"),
+        right=Side(border_style="thin", color="262626"),
+        top=Side(border_style="thin", color="262626"),
+        bottom=Side(border_style="thin", color="262626")
+    )
+
+    subtotals = ["SOUS TOTAL IAC", "SOUS TOTAL IHAC", "SOUS TOTAL MAC", "SOUS TOTAL MHAC"]
+
+    # Get the current date information
+    current_date = datetime.now()
+    current_year = current_date.year
+    last_month = current_date.month - 1 if current_date.month > 1 else 12
+    last_month_name = datetime(1900, last_month, 1).strftime('%B')
+    if last_month == 12:
+        current_year -= 1  # Adjust the year if the last month is December from the previous year
+
+    def write_dataframe_to_sheet(df, start_row, start_col, subtotal_text):
+        sheet.merge_cells(f"H{start_row}:U{start_row}")
+        last_month_label_cell = sheet["H" + str(start_row)]
+        last_month_label_cell.value = f"{last_month_name} {current_year}"
+        last_month_label_cell.fill = date_fill
+        last_month_label_cell.font = date_font
+        last_month_label_cell.alignment = date_alignment
+        last_month_label_cell.border = thin_border
+
+        # "Cumul de janvier à {last month} {current year}" from V to AI
+        sheet.merge_cells(f"V{start_row}:AI{start_row}")
+        cumulative_label_cell = sheet["V" + str(start_row)]
+        cumulative_label_cell.value = f"January {current_year} to {last_month_name} {current_year}"
+        cumulative_label_cell.fill = date_fill
+        cumulative_label_cell.font = date_font
+        cumulative_label_cell.alignment = date_alignment
+        cumulative_label_cell.border = thin_border
+
+        # Write top labels above headers (one row below the date labels)
+        label_ranges = [
+            ("Industrie", "H", "K"),
+            ("Groupe AF KL", "L", "O"),
+            ("% GROUPE AF KL", "P", "U"),
+            ("Industrie", "V", "Y"),
+            ("Groupe AF KL", "Z", "AC"),
+            ("% GROUPE AF KL", "AD", "AI")
+        ]
+
+        for label, start_col_letter, end_col_letter in label_ranges:
+            sheet.merge_cells(f"{start_col_letter}{start_row + 1}:{end_col_letter}{start_row + 1}")
+            top_label_cell = sheet[f"{start_col_letter}{start_row + 1}"]
+            top_label_cell.value = label
+            top_label_cell.fill = top_label_fill
+            top_label_cell.font = top_label_font
+            top_label_cell.alignment = top_label_alignment
+            top_label_cell.border = thin_border
+
+
+        # Write headers below the top labels
+        for col_idx, header in enumerate(headers, start=start_col):
+            cell = sheet.cell(row=start_row + 2, column=col_idx)
+            cell.value = header
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+            cell.border = thin_border
+
+        # Write data below headers
+        for r_idx in range(len(df)):
+            for c_idx in range(len(df.columns)):
+                cell = sheet.cell(row=start_row + r_idx + 3, column=start_col + c_idx)
+                cell.value = df.iloc[r_idx, c_idx]
+                cell.border = thin_border
+
+        # Write subtotal row (moved one row up)
+        subtotal_row = start_row + len(df) + 2  # Subtotal row is now directly after the last data row
+        start_merge_col = get_column_letter(start_col)
+        end_merge_col = get_column_letter(start_col + 6)  # Merge columns A to G
+        sheet.merge_cells(f"{start_merge_col}{subtotal_row}:{end_merge_col}{subtotal_row}")
+        subtotal_cell = sheet.cell(row=subtotal_row, column=start_col)
+        subtotal_cell.value = subtotal_text
+        subtotal_cell.fill = subtotal_fill
+        subtotal_cell.font = Font(bold=True, color="FFFFFF")  # White font for subtotal, bold
+        subtotal_cell.alignment = subtotal_alignment
+        subtotal_cell.border = thin_border
+
+        for col_idx in range(start_col + 7, start_col + len(headers)):
+            cell = sheet.cell(row=subtotal_row, column=col_idx)
+            cell.font = Font(bold=True)  # Apply bold to the subtotal values
+            cell.border = thin_border
+
+    # Write the data to the worksheet
+    start_row = 7
+    start_col = 1
+
+    # Write IAC data
+    write_dataframe_to_sheet(iac_df, start_row, start_col, subtotals[0])
+    # Calculate the new starting row for the next table
+    start_row += len(iac_df) + 5
+
+    # Write IHAC data
+    write_dataframe_to_sheet(ihac_df, start_row, start_col, subtotals[1])
+    start_row += len(ihac_df) + 5
+
+    # Write MAC data
+    write_dataframe_to_sheet(mac_df, start_row, start_col, subtotals[2])
+    start_row += len(mac_df) + 5
+
+    # Write MHAC data
+    write_dataframe_to_sheet(mhac_df, start_row, start_col, subtotals[3])
+
+    # Save the updated workbook
+    updated_excel_path = 'csv/res/temp_final.xlsx'
+    workbook.save(updated_excel_path)
+
+    # Return the path of the updated file
+    return updated_excel_path
+
+def create_excel_train():
+    # Load the CSV files into DataFrames
+    euro_df = pd.read_csv('csv/OK/total_euro.csv')
+    metro_df = pd.read_csv('csv/OK/total_metro.csv')
+
+    # Drop the "O&D" column and columns ending with "_N_1"
+    columns_to_exclude = ["O&D"] + [col for col in euro_df.columns if col.endswith("_N_1")]
+
+    euro_df.drop(columns=columns_to_exclude, inplace=True, errors='ignore')
+    metro_df.drop(columns=columns_to_exclude, inplace=True, errors='ignore')
+
+    # Drop rows where "CA_jan_to_last_month_N" or "OD_jan_to_last_month_N" are empty (NaN)
+    euro_df.dropna(subset=["CA_jan_to_last_month_N", "OD_jan_to_last_month_N"], inplace=True)
+    metro_df.dropna(subset=["CA_jan_to_last_month_N", "OD_jan_to_last_month_N"], inplace=True)
+
+
+    # Reorder columns as specified
+    columns_order = [
+        "CODE ORIGINE", "CODE DESTINATION", "LIBELLE ORIGINE", "LIBELLE DESTINATION",
+        "CA_last_month_N", "RR_CA", "OD_last_month_N", "RR_OD",
+        "CA_jan_to_last_month_N", "cumul_RR_CA", "OD_jan_to_last_month_N", "cumul_RR_OD"
+    ]
+
+    euro_df = euro_df[columns_order]
+    metro_df = metro_df[columns_order]
+
+    # Rename columns as specified
+    rename_columns = {
+        "CA_last_month_N": "CA",
+        "CA_jan_to_last_month_N": "cumul_CA",
+        "OD_last_month_N": "OD",
+        "OD_jan_to_last_month_N": "cumul_OD"
+    }
+
+    euro_df.rename(columns=rename_columns, inplace=True)
+    metro_df.rename(columns=rename_columns, inplace=True)
+
+    # Load the existing Excel file
+    excel_path = "csv/res/temp_final.xlsx"
+    workbook = load_workbook(excel_path)
+
+    # Select the worksheets "Etat 1.2" and "Etat 1.3"
+    euro_sheet_name = "Etat 1.2"
+    metro_sheet_name = "Etat 1.3"
+
+    euro_sheet = workbook[euro_sheet_name] if euro_sheet_name in workbook.sheetnames else None
+    metro_sheet = workbook[metro_sheet_name] if metro_sheet_name in workbook.sheetnames else None
+
+    if not euro_sheet or not metro_sheet:
+        print("One of the specified sheets does not exist in the workbook.")
+        return
+
+    # Define headers to be used for each table
+    headers = list(euro_df.columns)
+
+    # Define styles for headers, date information, and borders
+    header_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+    header_font = Font(bold=True, color="FFFFFF")  # White font
+    header_alignment = Alignment(horizontal="center", vertical="center")
+
+    date_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+    date_font = Font(bold=True, color="FFFFFF")  # White font for date labels
+    date_alignment = Alignment(horizontal="center", vertical="center")
+
+    subtotal_fill = PatternFill(start_color="5c4292", end_color="5c4292",
+                                fill_type="solid")  # Purple fill for subtotals
+    subtotal_font = Font(bold=True, color="FFFFFF")  # White font for subtotals
+    subtotal_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(border_style="thin", color="262626"),
+        right=Side(border_style="thin", color="262626"),
+        top=Side(border_style="thin", color="262626"),
+        bottom=Side(border_style="thin", color="262626")
+    )
+
+    # Get the current date information
+    current_date = datetime.now()
+    current_year = current_date.year
+    last_month = current_date.month - 1 if current_date.month > 1 else 12
+    last_month_name = datetime(1900, last_month, 1).strftime('%B')
+    if last_month == 12:
+        current_year -= 1  # Adjust the year if the last month is December from the previous year
+
+    def write_dataframe_to_sheet(df, sheet, start_row, start_col, global_text):
+        # Unmerge all cells in the sheet to handle any existing merged cells
+        for merged_range in list(sheet.merged_cells.ranges):
+            sheet.unmerge_cells(str(merged_range))
+
+        for col_idx in range(5, 9):  # E to H for "Last month and year"
+            cell = sheet.cell(row=start_row, column=col_idx)
+            cell.border = thin_border
+
+        for col_idx in range(9, 13):  # I to L for "Cumul de janvier à {last month} {current year}"
+            cell = sheet.cell(row=start_row, column=col_idx)
+            cell.border = thin_border
+
+        # Write the date labels above the top labels
+        # "Last month and year" for the left part of the header
+        sheet.merge_cells(f"E{start_row}:H{start_row}")
+        last_month_label_cell = sheet["E" + str(start_row)]
+        last_month_label_cell.value = f"{last_month_name} {current_year}"
+        last_month_label_cell.fill = date_fill
+        last_month_label_cell.font = date_font
+        last_month_label_cell.alignment = date_alignment
+        last_month_label_cell.border = thin_border
+
+        # "Cumul de janvier à {last month} {current year}" for the right part of the header
+        sheet.merge_cells(f"I{start_row}:L{start_row}")
+        cumulative_label_cell = sheet["I" + str(start_row)]
+        cumulative_label_cell.value = f"January {current_year} to {last_month_name} {current_year}"
+        cumulative_label_cell.fill = date_fill
+        cumulative_label_cell.font = date_font
+        cumulative_label_cell.alignment = date_alignment
+        cumulative_label_cell.border = thin_border
+
+        # Write headers below the date labels
+        for col_idx, header in enumerate(headers, start=start_col):
+            cell = sheet.cell(row=start_row + 1, column=col_idx)
+            cell.value = header
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+            cell.border = thin_border
+
+        # Write data below headers
+        for r_idx in range(len(df)):
+            for c_idx in range(len(df.columns)):
+                cell = sheet.cell(row=start_row + r_idx + 2, column=start_col + c_idx)
+                cell.value = df.iloc[r_idx, c_idx]
+                cell.border = thin_border
+
+        # Write global total row
+        global_row = start_row + len(df) + 1  # Adjust row to move up by 1
+        sheet.merge_cells(f"A{global_row}:D{global_row}")
+        global_total_cell = sheet.cell(row=global_row, column=start_col)
+        global_total_cell.value = global_text
+        global_total_cell.fill = subtotal_fill
+        global_total_cell.font = subtotal_font
+        global_total_cell.alignment = subtotal_alignment
+        global_total_cell.border = thin_border
+        for col in range(start_col, start_col + len(headers)):
+            cell = sheet.cell(row=global_row, column=col)
+            cell.border = thin_border
+
+        for col_idx in range(start_col + 4, start_col + len(headers)):
+            cell = sheet.cell(row=global_row, column=col_idx)
+            cell.font = Font(bold=True)  # Make the values bold
+            cell.border = thin_border
+
+    # Write euro data to "Etat 1.2"
+    write_dataframe_to_sheet(metro_df, euro_sheet, start_row=4, start_col=1, global_text="GLOBAL RAIL")
+
+    # Write metro data to "Etat 1.3"
+    write_dataframe_to_sheet(euro_df, metro_sheet, start_row=4, start_col=1, global_text="GLOBAL RAIL")
+
+    # Save the updated workbook
+    updated_excel_path = 'csv/OK/final.xlsx'
+    workbook.save(updated_excel_path)
+
+    # Return the path of the updated file
+    return updated_excel_path
+
+def extract_global():
+    import pandas as pd
+
+    # Load the provided CSV file
+    csv_path = "csv/OK/totals_flight.csv"
+    totals_flight = pd.read_csv(csv_path)
+
+    # Extract the row for "Total GLOBAL"
+    total_global_row = totals_flight[totals_flight['ANNEX_C'] == 'Total GLOBAL']
+
+    # Define the required columns in the specified order
+    required_columns = [
+        "CA TOTAL INDUSTRIE_N", "RR_CA TOTAL INDUSTRIE", "NB O&D INDUSTRIE_N", "RR_NB O&D INDUSTRIE",
+        "CA GROUPE AF KL_N", "RR_CA GROUPE AF KL", "NB O&D GROUPE AF KL_N", "RR_NB O&D GROUPE AF KL",
+        "TP_CA_AF_KL", "TP_CA_AF_KL_ONLINE", "EVOL_TP_CA", "TP_OD_AF_KL", "TP_OD_AF_KL_ONLINE", "EVOL_TP_OD",
+        "cumul_CA_TOTAL_INDUSTRIE", "cumul_RR_CA TOTAL INDUSTRIE", "cumul_NB_O&D_INDUSTRIE",
+        "cumul_RR_NB O&D INDUSTRIE",
+        "cumul_CA_GROUPE_AF_KL", "cumul_RR_CA GROUPE AF KL", "cumul_NB_O&D_GROUPE_AF_KL",
+        "cumul_RR_NB O&D GROUPE AF KL",
+        "cumul_TP_CA_AF_KL", "cumul_TP_CA_AF_KL_ONLINE", "cumul_EVOL_TP_CA", "cumul_TP_OD_AF_KL",
+        "cumul_TP_OD_AF_KL_ONLINE", "cumul_EVOL_TP_OD"
+    ]
+
+    # Keep only the required columns from "Total GLOBAL"
+    if not total_global_row.empty:
+        total_global_filtered = total_global_row[required_columns]
+
+        # Save the filtered row into a new CSV file
+        output_path = "csv/OK/total_global.csv"
+        total_global_filtered.to_csv(output_path)
+
+
+def add_global():
+    import openpyxl
+    from openpyxl.styles import Alignment
+    import pandas as pd
+
+    # Load the provided Excel and CSV files
+    excel_path = "csv/OK/final.xlsx"
+    csv_path = "csv/OK/total_global.csv"
+
+    # Load the CSV file to get the "Total GLOBAL" row
+    csv_data = pd.read_csv(csv_path)
+
+    # Load the Excel workbook and the specific sheet
+    workbook = openpyxl.load_workbook(excel_path)
+    sheet = workbook["Etat 1.1"]
+
+    # Find the row index of "SOUS TOTAL MHAC" in the Excel sheet
+    sous_total_mhac_row = None
+    for idx, row in enumerate(sheet.iter_rows(min_row=1, max_col=1, values_only=True), start=1):
+        if row[0] == "SOUS TOTAL MHAC":
+            sous_total_mhac_row = idx
+            break
+
+    # Insert "Total GLOBAL" two lines after "SOUS TOTAL MHAC"
+    if sous_total_mhac_row is not None and not csv_data.empty:
+        # Get the row to append and reset its index
+        total_global_row = csv_data.reset_index(drop=True).iloc[0]
+
+        # Prepare the insertion row number
+        insert_row = sous_total_mhac_row + 2
+
+        # Merge columns A to G for the "Total GLOBAL" label
+        sheet.merge_cells(start_row=insert_row, start_column=1, end_row=insert_row, end_column=7)
+        cell = sheet.cell(row=insert_row, column=1)
+        cell.value = "Total GLOBAL"
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # Write the rest of the values starting from column H
+        # Writing all columns starting from H without changing their order
+        for col_index, value in enumerate(total_global_row.iloc[1:], start=8):  # Start at column H, skip "ANNEX_C"
+            sheet.cell(row=insert_row, column=col_index, value=value)
+
+        # Save the updated workbook
+        output_excel_path = "csv/OK/final_global.xlsx"
+        workbook.save(output_excel_path)
+
+    else:
+        print("Total GLOBAL row not found in the CSV file or 'SOUS TOTAL MHAC' not found in the Excel sheet.")
+
+def joli():
+    import openpyxl
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import PatternFill
+
+    # Load the provided Excel workbook
+    file_path = "csv/OK/final_global.xlsx"
+    workbook = openpyxl.load_workbook(file_path)
+
+    # Define the white fill style
+    white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+    # Update the sheet "Etat 1.1" by adding a column at "V"
+    sheet = workbook["Etat 1.1"]
+    merged_cells = list(sheet.merged_cells.ranges)
+    sheet.insert_cols(22)
+    new_column_letter = get_column_letter(22)
+    sheet.column_dimensions[new_column_letter].width = 0.56  # Set width to 2 mm
+    for row in range(1, sheet.max_row + 1):
+        sheet[f'{new_column_letter}{row}'].fill = white_fill
+    sheet.merged_cells.ranges = []  # Clear existing merges
+    for merged_cell in merged_cells:
+        if merged_cell.min_col >= 22:
+            new_min_col = merged_cell.min_col + 1
+            new_max_col = merged_cell.max_col + 1
+        else:
+            new_min_col = merged_cell.min_col
+            new_max_col = merged_cell.max_col
+        new_range = f"{get_column_letter(new_min_col)}{merged_cell.min_row}:{get_column_letter(new_max_col)}{merged_cell.max_row}"
+        sheet.merge_cells(new_range)
+
+    # Update the sheets "Etat 1.2" and "Etat 1.3" by adding a column at "I"
+    sheets_to_update = ["Etat 1.2", "Etat 1.3"]
+
+    for sheet_name in sheets_to_update:
+        sheet = workbook[sheet_name]
+        merged_cells = list(sheet.merged_cells.ranges)
+        sheet.insert_cols(9)
+        new_column_letter = get_column_letter(9)
+        sheet.column_dimensions[new_column_letter].width = 0.56  # Set width to 2 mm
+        for row in range(1, sheet.max_row + 1):
+            sheet[f'{new_column_letter}{row}'].fill = white_fill
+        sheet.merged_cells.ranges = []  # Clear existing merges
+        for merged_cell in merged_cells:
+            if merged_cell.min_col >= 9:
+                new_min_col = merged_cell.min_col + 1
+                new_max_col = merged_cell.max_col + 1
+            else:
+                new_min_col = merged_cell.min_col
+                new_max_col = merged_cell.max_col
+            new_range = f"{get_column_letter(new_min_col)}{merged_cell.min_row}:{get_column_letter(new_max_col)}{merged_cell.max_row}"
+            sheet.merge_cells(new_range)
+
+    # Save the updated workbook
+    output_path = "csv/final_global_cleaned.xlsx"
+    workbook.save(output_path)
+
+    return output_path
+
+
 
