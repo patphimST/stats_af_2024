@@ -12,6 +12,8 @@ import numpy as np
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']
 
+carrier_list = ["AF", "KL","DL", "MU", "TO", "HV"]
+
 client = MongoClient(f'mongodb+srv://{config.mongo_pat}', tlsCAFile=certifi.where())
 
 # MongoDB collections
@@ -25,7 +27,26 @@ col_billings = db["billings"]
 airports_df = pd.read_csv("const/Air Airports and cities codes - O&D  2024.csv", delimiter=";")
 rail_metro_df = pd.read_csv("const/O&D Metropolis rail 2024 v In&Out.csv",delimiter=";")
 rail_euro_df = pd.read_csv("const/O&D European Rail 2024 v In&Out.csv",delimiter=";")
-carrier_list = ["AF", "KL", "DL", "LU", "TO", "HV", "VS"]
+
+current_date = datetime.now()
+current_year = current_date.year
+last_month = current_date.month - 1 if current_date.month > 1 else 12
+last_month_name = datetime(1900, last_month, 1).strftime('%B')
+if last_month == 12:
+    current_year -= 1  # Adjust the year if the last month is December from the previous year
+
+def get_soc(id_soc):
+    result = col_soc.find_one({"_id": ObjectId(f"{id_soc}")},
+                              {"name": 1, "settings.flight.bluebizz": 1, "_id": 0})
+
+    name = result.get("name", None)
+    bluebizz = result.get("settings", {}).get("flight", {}).get("bluebizz", None)
+    bluebizz_value = bluebizz if bluebizz else "Bluebizz"
+
+    osi = bluebizz_value
+    name_orga = name
+
+    return osi,name_orga
 
 def get_bills(id_soc,start_date):
     import pandas as pd
@@ -76,7 +97,6 @@ def get_bills(id_soc,start_date):
     df.to_csv(f"csv/base/bills_{id_soc}.csv")
     # Afficher le DataFrame
     print(df)
-
 
 ################ 🛫FLIGHT 🛫 #####################
 
@@ -358,8 +378,6 @@ def get_items_flight(id_soc, start_date):
     # Sauvegarder le DataFrame en CSV
     df.to_csv(f"csv/base/items_flight_{id_soc}.csv", index=False)
 
-import pandas as pd
-
 def merge_extract_flight(id_soc):
     # Charger les fichiers CSV de vol et fusionner
     df0 = pd.read_csv(f"csv/base/bills_{id_soc}.csv")
@@ -396,8 +414,7 @@ def merge_extract_flight(id_soc):
     df_filtered = df_filtered[df_filtered['O&D RESTITUE'] != ""]
     df_filtered.to_csv(f'csv/res/flight/filtered_flight_{id_soc}.csv', index=False)
 
-
-def group_flight(id_soc):
+def group_flight(id_soc,iata,osi):
     # Charger le fichier CSV téléchargé
     file_path = f'csv/res/flight/filtered_flight_{id_soc}.csv'
     df = pd.read_csv(file_path)
@@ -411,10 +428,11 @@ def group_flight(id_soc):
     # Agrégation des données
     df_grouped_af = df.groupby(grouping_columns).agg(
         TOTAL_BILLED_AIR_FRANCE=('TOTAL_BILLED', lambda x: x[df['AIRLINE_GROUP'] == 'AIR FRANCE'].sum()),
-        TOTAL_BILLED_INDUSTRIE=('TOTAL_BILLED', lambda x: x[df['AIRLINE_GROUP'] == 'INDUSTRIE'].sum()),
+        TOTAL_BILLED_INDUSTRIE=('TOTAL_BILLED', lambda x: x[(df['AIRLINE_GROUP'] == 'AIR FRANCE') | (df['AIRLINE_GROUP'] == 'INDUSTRIE')].sum()),
         NB_LEGS_AIR_FRANCE=('NB_LEGS', lambda x: x[df['AIRLINE_GROUP'] == 'AIR FRANCE'].sum()),
-        NB_LEGS_INDUSTRIE=('NB_LEGS', lambda x: x[df['AIRLINE_GROUP'] == 'INDUSTRIE'].sum())
+        NB_LEGS_INDUSTRIE=('NB_LEGS', lambda x: x[(df['AIRLINE_GROUP'] == 'AIR FRANCE') | (df['AIRLINE_GROUP'] == 'INDUSTRIE')].sum())
     ).reset_index()
+
 
     # fichier brut
     df_grouped = df.groupby(grouping_columns).agg({
@@ -445,9 +463,9 @@ def group_flight(id_soc):
     df_grouped_af['NB O&D GROUPE AF KL'] = df_grouped_af['NB O&D GROUPE AF KL'].round(0).astype(int)
     df_grouped_af['CA TOTAL INDUSTRIE'] = df_grouped_af['CA TOTAL INDUSTRIE'].round(0).astype(int)
     df_grouped_af['NB O&D INDUSTRIE'] = df_grouped_af['NB O&D INDUSTRIE'].round(0).astype(int)
-    df_grouped_af['REFERENCE AF'] = ''
+    df_grouped_af['REFERENCE AF'] = osi
     df_grouped_af['RAISON SOCIALE'] = ''
-    df_grouped_af['IATA EMETTEUR'] = ''
+    df_grouped_af['IATA EMETTEUR'] = iata
 
     # Connexion en base pour recup OIN et NAME
     result = col_soc.find_one({"_id": ObjectId(id_soc)})
@@ -492,7 +510,6 @@ def fetch_train_details(item_id):
 
         # Boucle sur tous les voyages (journeys)
         for journey_index, journey in enumerate(journeys):
-            # Vérifier si 'departure' et 'arrival' existent au niveau du voyage
             if journey.get('departure') and journey.get('arrival'):
                 ori_locationId = journey['departure'].get('locationId', '')
                 des_locationId = journey['arrival'].get('locationId', '')
@@ -792,7 +809,7 @@ def merge_extract_train(id_soc):
     df['ODLIST'] = pd.to_datetime(df['CREATED_AT']).dt.strftime('%Y')
     df.to_csv(f"csv/res/train/merge_train_{id_soc}.csv")
 
-def clean_train(id_soc):
+def clean_train(id_soc,iata):
     df = pd.read_csv(f'csv/res/train/merge_train_{id_soc}.csv')
     df['O&D'] = df['ori_code'].fillna('') + " " + df['des_code'].fillna('')
     grouped_columns = ['ISSUED_MONTH', 'ODLIST', 'O&D', 'ori_code', 'ori_label',
@@ -816,7 +833,7 @@ def clean_train(id_soc):
     # Remplir les colonnes du DataFrame
     grouped_result['REFERENCE AF'] = bluebizz_value
     grouped_result['RAISON SOCIALE'] = name
-    grouped_result['IATA EMETTEUR'] = ""
+    grouped_result['IATA EMETTEUR'] = iata
 
     #rename col
     grouped_result = grouped_result.rename(columns={
@@ -1108,7 +1125,6 @@ def calculate_rr_flight(id_soc) :
     # Sauvegarder le fichier final avec RR, ratios et cumuls
     df_final.to_csv(f"csv/res/flight/grouped_flight_with_rr_{id_soc}.csv")
 
-
 def merge_rr(id_soc):
     import pandas as pd
 
@@ -1181,7 +1197,7 @@ def split_final(id_soc):
 
     print("Files saved successfully with reordered columns for each split file!")
 
-def aggreg_flight(id_soc):
+def aggreg_flight(id_soc,name_orga):
     df = pd.read_csv(f"csv/res/flight/grouped_flight_{id_soc}.csv")
 
     # Reorder the columns based on the order you provided
@@ -1196,9 +1212,9 @@ def aggreg_flight(id_soc):
     df = df.sort_values(by=['O&D', 'DATE D\'EMISSION'], ascending = [True, False])
 
     # Save the result to a new CSV file
-    df.to_csv("csv/OK/aggreg_flight.csv",index = False)
+    df.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_air.xlsx",index = False)
 
-def aggreg_train(id_soc):
+def aggreg_train(id_soc,name_orga):
     df_euro = pd.read_csv(f"csv/res/train/grouped_train_euro_{id_soc}.csv")
     df_metro = pd.read_csv(f"csv/res/train/grouped_train_metro_{id_soc}.csv")
 
@@ -1217,8 +1233,8 @@ def aggreg_train(id_soc):
     df_metro = df_metro.reindex(columns=columns_order)
 
     # Save the results to new CSV files
-    df_euro.to_csv(f"csv/OK/aggreg_rail_euro.csv", index=False)
-    df_metro.to_csv(f"csv/OK/aggreg_rail_metro.csv", index=False)
+    df_euro.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_rail_euro.xlsx", index=False)
+    df_metro.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_rail_metro.xlsx", index=False)
 
     print("Reorganization and saving completed for both df_euro and df_metro.")
 
@@ -1438,7 +1454,7 @@ def total(id_soc):
     grouped_totals.to_csv(output_path)
 import pandas as pd
 
-def total_global(id_soc):
+def total_global():
     # Load the CSV file
     file_path = f'csv/OK/totals_flight.csv'
     df = pd.read_csv(file_path)
@@ -1541,7 +1557,7 @@ def total_global(id_soc):
     df.to_csv(output_path, index=False)
 
 
-def merge_total_flight(id_soc):
+def merge_total_flight():
     # Charger les 4 premières lignes de `totals_flight.csv`
     totals_flight_path = 'csv/OK/totals_flight.csv'
     totals_flight = pd.read_csv(totals_flight_path, nrows=4).reset_index(drop=True)
@@ -1926,7 +1942,7 @@ def create_excel_train():
     write_dataframe_to_sheet(euro_df, metro_sheet, start_row=4, start_col=1, global_text="GLOBAL RAIL")
 
     # Save the updated workbook
-    updated_excel_path = 'csv/OK/final.xlsx'
+    updated_excel_path = 'csv/OK/temp_final.xlsx'
     workbook.save(updated_excel_path)
 
     # Return the path of the updated file
@@ -1964,14 +1980,15 @@ def extract_global():
         total_global_filtered.to_csv(output_path)
 
 
-def add_global():
+def add_global(name_orga):
     import openpyxl
     from openpyxl.styles import Alignment
     import pandas as pd
 
+
     # Load the provided Excel and CSV files
-    excel_path = "csv/OK/final.xlsx"
-    csv_path = "csv/OK/total_global.csv"
+    excel_path = "csv/OK/temp_final.xlsx"
+    csv_path = f"csv/OK/total_global.csv"
 
     # Load the CSV file to get the "Total GLOBAL" row
     csv_data = pd.read_csv(csv_path)
@@ -2007,32 +2024,82 @@ def add_global():
             sheet.cell(row=insert_row, column=col_index, value=value)
 
         # Save the updated workbook
-        output_excel_path = "csv/OK/final_global.xlsx"
+        output_excel_path = f"csv/OK/{name_orga}_{last_month_name}_{current_year}.xlsx"
         workbook.save(output_excel_path)
 
     else:
         print("Total GLOBAL row not found in the CSV file or 'SOUS TOTAL MHAC' not found in the Excel sheet.")
 
-def joli():
-    import openpyxl
-    from openpyxl.utils import get_column_letter
-    from openpyxl.styles import PatternFill
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill, Font, Alignment
 
+def joli(name_orga):
     # Load the provided Excel workbook
-    file_path = "csv/OK/final_global.xlsx"
+    file_path = f"csv/OK/{name_orga}_September_2024.xlsx"
     workbook = openpyxl.load_workbook(file_path)
 
-    # Define the white fill style
+    workbook = openpyxl.load_workbook(file_path)
+
+    # Define the white fill style for the added columns
     white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
 
-    # Update the sheet "Etat 1.1" by adding a column at "V"
+    # Define the styles for "TOTAL GLOBAL"
+    header_fill = PatternFill(start_color="5C4292", end_color="5C4292",
+                              fill_type="solid")  # Purple fill with better contrast
+    header_font_white = Font(bold=True, color="FFFFFF")  # White font for header text
+    header_font_black = Font(bold=True, color="000000")  # Black font for other cells in the row
+    header_alignment = Alignment(horizontal="center", vertical="center")
+
+    # Define border style for the row "Total GLOBAL"
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    # Update the sheet "Etat 1.1"
     sheet = workbook["Etat 1.1"]
+
+    # Iterate through merged cells to find "Total GLOBAL" and apply styles
+    for merged_cell in sheet.merged_cells.ranges:
+        top_left_cell = sheet.cell(row=merged_cell.min_row, column=merged_cell.min_col)
+        if top_left_cell.value and "Total GLOBAL" in str(top_left_cell.value):
+            # Apply styles to the merged cells (A to G) for "Total GLOBAL"
+            for row in sheet.iter_rows(min_row=merged_cell.min_row, max_row=merged_cell.max_row,
+                                       min_col=merged_cell.min_col, max_col=merged_cell.max_col):
+                for cell in row:
+                    cell.fill = header_fill
+                    cell.font = header_font_white
+                    cell.alignment = header_alignment
+
+            # Apply bold style to the entire row of "Total GLOBAL" (from A to the last column), with black text for columns after G
+            for col in range(1, sheet.max_column + 1):
+                cell = sheet.cell(row=merged_cell.min_row, column=col)
+                if col <= 7:  # Columns A to G should have white text
+                    cell.font = header_font_white
+                else:  # Other columns should have black text
+                    cell.font = header_font_black
+
+            # Apply border to the specified range of cells (A to U and W to AJ)
+            for col in range(1, 22):  # Columns A to U (1 to 20)
+                cell = sheet.cell(row=merged_cell.min_row, column=col)
+                cell.border = thin_border
+
+            for col in range(22, 36):  # Columns W to AJ (23 to 36)
+                cell = sheet.cell(row=merged_cell.min_row, column=col)
+                cell.border = thin_border
+
+    # Create an empty column at "V" and shift contents to the right without breaking merged cells
     merged_cells = list(sheet.merged_cells.ranges)
     sheet.insert_cols(22)
     new_column_letter = get_column_letter(22)
     sheet.column_dimensions[new_column_letter].width = 0.56  # Set width to 2 mm
     for row in range(1, sheet.max_row + 1):
         sheet[f'{new_column_letter}{row}'].fill = white_fill
+
+    # Update merged cell ranges to account for the inserted column
     sheet.merged_cells.ranges = []  # Clear existing merges
     for merged_cell in merged_cells:
         if merged_cell.min_col >= 22:
@@ -2067,10 +2134,10 @@ def joli():
             sheet.merge_cells(new_range)
 
     # Save the updated workbook
-    output_path = "csv/final_global_cleaned.xlsx"
+    output_path = f"csv/OK/{name_orga}_September_2024.xlsx"
     workbook.save(output_path)
 
-    return output_path
+
 
 
 
