@@ -4,9 +4,10 @@ import dns.resolver
 import certifi
 from bson import ObjectId, errors
 import config
-import os
+from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
+import pandas as pd
 from datetime import datetime
-import numpy as np
 
 # DNS resolver and MongoDB connection setup
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
@@ -877,7 +878,7 @@ def clean_train(id_soc,iata):
 
 ################ 🤖 TRAITEMENT 🤖 #####################
 
-def calculate_rr_flight(id_soc) :
+def calculate_rr_flight_old(id_soc) :
 
     # Charger les données
     df = pd.read_csv(f"csv/res/flight/grouped_flight_{id_soc}.csv")
@@ -940,16 +941,15 @@ def calculate_rr_flight(id_soc) :
     df_rr_combined = pd.DataFrame(index=df_n.index)
     for column in columns_to_calculate:
         df_rr = df_n[[column]].join(df_n_1[[column]], lsuffix='_N', rsuffix='_N_1')
-        df_rr[f'RR_{column}'] = (((df_rr[f'{column}_N'] / df_rr[f'{column}_N_1']) - 1) * 100).fillna(0).round(2)
+        df_rr[f'RR_{column}'] = (((df_rr[f'{column}_N'] / df_rr[f'{column}_N_1']) - 1)*100).fillna(0).round(2)
         # Join N-1 and N values to df_rr_combined
         df_rr_combined = df_rr_combined.join(df_rr[[f'{column}_N', f'{column}_N_1', f'RR_{column}']])
 
-    # Save the final CSV with N and N-1 values along with RR calculations
     # Calcul des ratios TP CA et TP OD
-    df_rr_combined['TP_CA_AF_KL'] = (df_n['CA GROUPE AF KL'] / df_n['CA TOTAL INDUSTRIE']).round(2)
-    df_rr_combined['TP_OD_AF_KL'] = (df_n['NB O&D GROUPE AF KL'] / df_n['NB O&D INDUSTRIE']).round(2)
-    df_rr_combined['TP_CA_AF_KL_N_1'] = (df_n_1['CA GROUPE AF KL'] / df_n_1['CA TOTAL INDUSTRIE']).round(2)
-    df_rr_combined['TP_OD_AF_KL_N_1'] = (df_n_1['NB O&D GROUPE AF KL'] / df_n_1['NB O&D INDUSTRIE']).round(2)
+    df_rr_combined['TP_CA_AF_KL'] = ((df_n['CA GROUPE AF KL'] / df_n['CA TOTAL INDUSTRIE'])*100).round(2)
+    df_rr_combined['TP_OD_AF_KL'] = ((df_n['NB O&D GROUPE AF KL'] / df_n['NB O&D INDUSTRIE'])*100).round(2)
+    df_rr_combined['TP_CA_AF_KL_N_1'] = ((df_n_1['CA GROUPE AF KL'] / df_n_1['CA TOTAL INDUSTRIE'])*100).round(2)
+    df_rr_combined['TP_OD_AF_KL_N_1'] = ((df_n_1['NB O&D GROUPE AF KL'] / df_n_1['NB O&D INDUSTRIE'])*100).round(2)
 
     # Calcul des nouvelles colonnes pour "Online"
     df_rr_combined['CA_AF_KL_ONLINE'] = df_online_n['CA GROUPE AF KL'].fillna(0)
@@ -958,8 +958,8 @@ def calculate_rr_flight(id_soc) :
     df_rr_combined['OD_INDUSTRIE_ONLINE'] = df_online_n['NB O&D INDUSTRIE'].fillna(0)
 
     # Calcul des ratios "Online"
-    df_rr_combined['TP_CA_AF_KL_ONLINE'] = (df_online_n['CA GROUPE AF KL'] / df_online_n['CA TOTAL INDUSTRIE']).round(2)
-    df_rr_combined['TP_OD_AF_KL_ONLINE'] = (df_online_n['NB O&D GROUPE AF KL'] / df_online_n['NB O&D INDUSTRIE']).round(2)
+    df_rr_combined['TP_CA_AF_KL_ONLINE'] = ((df_online_n['CA GROUPE AF KL'] / df_online_n['CA TOTAL INDUSTRIE'])*100).round(2)
+    df_rr_combined['TP_OD_AF_KL_ONLINE'] = ((df_online_n['NB O&D GROUPE AF KL'] / df_online_n['NB O&D INDUSTRIE'])*100).round(2)
 
     # Calcul des évolutions TP CA et TP OD
     df_rr_combined['EVOL_TP_CA'] = (df_rr_combined['TP_CA_AF_KL'] - df_rr_combined['TP_CA_AF_KL_N_1']).round(2)
@@ -987,18 +987,6 @@ def calculate_rr_flight(id_soc) :
 
 
 
-    # Calcul des ratios TP_CA et TP_OD pour les cumuls
-    df_cumul_grouped['cumul_TP_CA_AF_KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'] / df_cumul_grouped['cumul_CA_TOTAL_INDUSTRIE']).round(2)
-    df_cumul_grouped['cumul_TP_OD_AF_KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'] / df_cumul_grouped['cumul_NB_O&D_INDUSTRIE']).round(2)
-
-    # Calcul des cumuls RR pour 'CA TOTAL INDUSTRIE' et 'NB O&D INDUSTRIE'
-    df_cumul_grouped['cumul_RR_CA TOTAL INDUSTRIE'] = (df_cumul_grouped['cumul_CA_TOTAL_INDUSTRIE'].pct_change() * 100).round(2)
-    df_cumul_grouped['cumul_RR_NB O&D INDUSTRIE'] = (df_cumul_grouped['cumul_NB_O&D_INDUSTRIE'].pct_change() * 100).round(2)
-
-    # Calcul des cumuls RR pour 'CA GROUPE AF KL' et 'NB O&D GROUPE AF KL'
-    df_cumul_grouped['cumul_RR_CA GROUPE AF KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'].pct_change() * 100).round(2)
-    df_cumul_grouped['cumul_RR_NB O&D GROUPE AF KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'].pct_change() * 100).round(2)
-
 
     # Calcul des cumuls TP_CA_AF_KL et TP_OD_AF_KL pour les transactions "Online"
     df_online_cumul = df_online_grouped[(df_online_grouped['YEAR'] == current_year) & (df_online_grouped['MONTH'] < current_month)]
@@ -1009,8 +997,8 @@ def calculate_rr_flight(id_soc) :
         'NB O&D INDUSTRIE': 'sum'
     }).reset_index()
 
-    df_online_cumul_grouped['cumul_TP_CA_AF_KL_ONLINE'] = (df_online_cumul_grouped['CA GROUPE AF KL'] / df_online_cumul_grouped['CA TOTAL INDUSTRIE']).round(2)
-    df_online_cumul_grouped['cumul_TP_OD_AF_KL_ONLINE'] = (df_online_cumul_grouped['NB O&D GROUPE AF KL'] / df_online_cumul_grouped['NB O&D INDUSTRIE']).round(2)
+    df_online_cumul_grouped['cumul_TP_CA_AF_KL_ONLINE'] = ((df_online_cumul_grouped['CA GROUPE AF KL'] / df_online_cumul_grouped['CA TOTAL INDUSTRIE'])*100).round(2)
+    df_online_cumul_grouped['cumul_TP_OD_AF_KL_ONLINE'] = ((df_online_cumul_grouped['NB O&D GROUPE AF KL'] / df_online_cumul_grouped['NB O&D INDUSTRIE'])*100).round(2)
 
 
     # Vérification de l'année en cours et du mois précédent
@@ -1029,8 +1017,8 @@ def calculate_rr_flight(id_soc) :
     cumul_prev_year = current_year - 1  # Année N-1 pour les cumuls de janvier à mois courant N-1
 
     # Filtrer les données du mois N (mois dernier) et N-1 (même mois, année précédente)
-    df_n = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] == prev_month)]
-    df_n_1 = df_grouped[(df_grouped['YEAR'] == prev_year) & (df_grouped['MONTH'] == prev_month)]
+    # df_n = df_grouped[(df_grouped['YEAR'] == current_year) & (df_grouped['MONTH'] == prev_month)]
+    # df_n_1 = df_grouped[(df_grouped['YEAR'] == prev_year) & (df_grouped['MONTH'] == prev_month)]
 
     # Filtrer les données pour les cumuls de janvier à mois courant de l'année N-1
     df_cumul_n_1 = df_grouped[(df_grouped['YEAR'] == cumul_prev_year) & (df_grouped['MONTH'] <= prev_month)]
@@ -1047,17 +1035,28 @@ def calculate_rr_flight(id_soc) :
     df_cumul_grouped['cumul_TP_CA_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(
         df_cumul_n_1_grouped.set_index('O&D').apply(lambda row: (row['CA GROUPE AF KL'] / row['CA TOTAL INDUSTRIE']).round(2) if row['CA TOTAL INDUSTRIE'] > 0 else 0,
             axis=1))
-
     df_cumul_grouped['cumul_TP_OD_AF_KL_N_1'] = df_cumul_grouped['O&D'].map(df_cumul_n_1_grouped.set_index('O&D').apply(lambda row: (row['NB O&D GROUPE AF KL'] / row['NB O&D INDUSTRIE']).round(2) if row['NB O&D INDUSTRIE'] > 0 else 0,
             axis=1))
 
+    # Calcul des ratios TP_CA et TP_OD pour les cumuls
+    df_cumul_grouped['cumul_TP_CA_AF_KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'] / df_cumul_grouped['cumul_CA_TOTAL_INDUSTRIE']).round(2)
+    df_cumul_grouped['cumul_TP_OD_AF_KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'] / df_cumul_grouped['cumul_NB_O&D_INDUSTRIE']).round(2)
+
+    # Calcul des cumuls RR pour 'CA TOTAL INDUSTRIE' et 'NB O&D INDUSTRIE'
+    df_cumul_grouped['cumul_RR_CA TOTAL INDUSTRIE'] = (((df_cumul_grouped['cumul_TP_CA_AF_KL']/df_cumul_grouped['cumul_TP_CA_AF_KL_N_1'])-1)*100).round(2)
+    df_cumul_grouped['cumul_RR_NB O&D INDUSTRIE'] = (df_cumul_grouped['cumul_NB_O&D_INDUSTRIE'].pct_change()).round(2)
+
+    # Calcul des cumuls RR pour 'CA GROUPE AF KL' et 'NB O&D GROUPE AF KL'
+    df_cumul_grouped['cumul_RR_CA GROUPE AF KL'] = (df_cumul_grouped['cumul_CA_GROUPE_AF_KL'].pct_change()).round(2)
+    df_cumul_grouped['cumul_RR_NB O&D GROUPE AF KL'] = (df_cumul_grouped['cumul_NB_O&D_GROUPE_AF_KL'].pct_change()).round(2)
+
+
     # Calcul des cumuls EVOL_TP_CA et EVOL_TP_OD en utilisant les cumuls
     df_cumul_grouped['cumul_EVOL_TP_CA'] = (df_cumul_grouped['cumul_TP_CA_AF_KL'] - df_cumul_grouped['cumul_TP_CA_AF_KL_N_1']).round(2)
-
     df_cumul_grouped['cumul_EVOL_TP_OD'] = (df_cumul_grouped['cumul_TP_OD_AF_KL'] - df_cumul_grouped['cumul_TP_OD_AF_KL_N_1']).round(2)
+
     # Joindre les résultats "Online" à df_cumul_grouped sans écraser les colonnes
     df_cumul_grouped = df_cumul_grouped.join(df_online_cumul_grouped.set_index('O&D')[['cumul_TP_CA_AF_KL_ONLINE', 'cumul_TP_OD_AF_KL_ONLINE']], on='O&D')
-
 
     # Filtrer les données pour l'année N-1
     df_cumul_n_1 = df_grouped[(df_grouped['YEAR'] == current_year - 1) & (df_grouped['MONTH'] <= prev_month)]
@@ -1125,11 +1124,268 @@ def calculate_rr_flight(id_soc) :
     # Sauvegarder le fichier final avec RR, ratios et cumuls
     df_final.to_csv(f"csv/res/flight/grouped_flight_with_rr_{id_soc}.csv")
 
+def calculate_rr_flight_cumul(id_soc):
+        # Charger les données
+        df = pd.read_csv(f"csv/res/flight/grouped_flight_{id_soc}.csv")
+
+        # Convertir la colonne "DATE D'EMISSION" en datetime
+        df["DATE D'EMISSION"] = pd.to_datetime(df["DATE D'EMISSION"], format='%Y%m')
+
+        # Convertir les colonnes "ODLIST" et "IATA EMETTEUR" en texte pour les exclure des calculs numériques
+        df['ODLIST'] = df['ODLIST'].astype(str)
+        df['IATA EMETTEUR'] = df['IATA EMETTEUR'].astype(str)
+
+        # Obtenir l'année en cours et le mois précédent
+        current_year = datetime.now().year
+        last_month = datetime.now().month - 1
+        if last_month == 0:
+            last_month = 12
+            current_year -= 1
+
+        # Définir les périodes de filtre
+        start_date_n = f"{current_year}-01-01"
+        end_date_n = f"{current_year}-{last_month:02d}-28"
+        start_date_n_1 = f"{current_year - 1}-01-01"
+        end_date_n_1 = f"{current_year - 1}-{last_month:02d}-28"
+
+        # Filtrer les données pour les périodes souhaitées
+        df_n = df[
+            (df["DATE D'EMISSION"] >= start_date_n) & (df["DATE D'EMISSION"] <= end_date_n) & (df['ODLIST'] == '2024')]
+        df_n_1 = df[(df["DATE D'EMISSION"] >= start_date_n_1) & (df["DATE D'EMISSION"] <= end_date_n_1) & (
+                    df['ODLIST'] == '2023')]
+
+        # Filtrer les données pour "Online"
+        df_n_online = df_n[df_n["TYPE DE VENTE"] == "Online"]
+        df_n_1_online = df_n_1[df_n_1["TYPE DE VENTE"] == "Online"]
+
+        # Group by the specified columns (exclure "ODLIST" et "IATA EMETTEUR")
+        grouped_columns = [
+            'O&D', 'ZONE ORIGINE', 'PERIMETRE', 'LIBELLE ORIGINE', 'LIBELLE DESTINATION',
+            'CODE ORIGINE', 'CODE DESTINATION', 'REFERENCE AF', 'RAISON SOCIALE'
+        ]
+
+        # Effectuer les opérations d'agrégation uniquement sur les colonnes numériques
+        numeric_columns = df_n.select_dtypes(include=['number']).columns
+
+        grouped_n = df_n.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+        grouped_n_1 = df_n_1.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+
+        # Grouper les données "Online"
+        grouped_n_online = df_n_online.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+        grouped_n_1_online = df_n_1_online.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+
+        # Merge the results for both years to ensure they align properly
+        result = pd.merge(grouped_n, grouped_n_1, on=grouped_columns, how='outer', suffixes=('_N', '_N_1')).fillna(0)
+        result_online = pd.merge(grouped_n_online, grouped_n_1_online, on=grouped_columns, how='outer',
+                                 suffixes=('_N', '_N_1')).fillna(0)
+
+        # Calculs des colonnes cumulées avant de procéder aux autres calculs
+        result['cumul_OD_AFKL_N'] = result['NB O&D GROUPE AF KL_N']
+        result['cumul_CA_AFKL_N'] = result['CA GROUPE AF KL_N']
+        result['cumul_OD_INDUSTRIE_N'] = result['NB O&D INDUSTRIE_N']
+        result['cumul_CA_INDUSTRIE_N'] = result['CA TOTAL INDUSTRIE_N']
+
+        result['cumul_OD_AFKL_N_1'] = result['NB O&D GROUPE AF KL_N_1']
+        result['cumul_CA_AFKL_N_1'] = result['CA GROUPE AF KL_N_1']
+        result['cumul_OD_INDUSTRIE_N_1'] = result['NB O&D INDUSTRIE_N_1']
+        result['cumul_CA_INDUSTRIE_N_1'] = result['CA TOTAL INDUSTRIE_N_1']
+
+        # Calcul des colonnes pour "Online"
+        result['cumul_OD_AFKL_ONLINE_N'] = result_online['NB O&D GROUPE AF KL_N']
+        result['cumul_CA_AFKL_ONLINE_N'] = result_online['CA GROUPE AF KL_N']
+        result['cumul_OD_INDUSTRIE_ONLINE_N'] = result_online['NB O&D INDUSTRIE_N']
+        result['cumul_CA_INDUSTRIE_ONLINE_N'] = result_online['CA TOTAL INDUSTRIE_N']
+
+        result['cumul_OD_AFKL_ONLINE_N_1'] = result_online['NB O&D GROUPE AF KL_N_1']
+        result['cumul_CA_AFKL_ONLINE_N_1'] = result_online['CA GROUPE AF KL_N_1']
+        result['cumul_OD_INDUSTRIE_ONLINE_N_1'] = result_online['NB O&D INDUSTRIE_N_1']
+        result['cumul_CA_INDUSTRIE_ONLINE_N_1'] = result_online['CA TOTAL INDUSTRIE_N_1']
+
+        # Adding the new calculated columns with the specified formulas for TP and RR
+        result['cumul_TP_OD_AFKL_N'] = ((result['cumul_OD_AFKL_N'] / result['cumul_OD_INDUSTRIE_N']) * 100).round(2)
+        result['cumul_TP_CA_AFKL_N'] = ((result['cumul_CA_AFKL_N'] / result['cumul_CA_INDUSTRIE_N']) * 100).round(2)
+        result['cumul_TP_OD_AFKL_ONLINE_N'] = (
+                (result['cumul_OD_AFKL_ONLINE_N'] / result['cumul_OD_INDUSTRIE_ONLINE_N']) * 100).round(2)
+        result['cumul_TP_CA_AFKL_ONLINE_N'] = (
+                (result['cumul_CA_AFKL_ONLINE_N'] / result['cumul_CA_INDUSTRIE_ONLINE_N']) * 100).round(2)
+
+        result['cumul_TP_OD_AFKL_N_1'] = ((result['cumul_OD_AFKL_N_1'] / result['cumul_OD_INDUSTRIE_N_1']) * 100).round(
+            2)
+        result['cumul_TP_CA_AFKL_N_1'] = ((result['cumul_CA_AFKL_N_1'] / result['cumul_CA_INDUSTRIE_N_1']) * 100).round(
+            2)
+        result['cumul_TP_OD_AFKL_ONLINE_N_1'] = (
+                (result['cumul_OD_AFKL_ONLINE_N_1'] / result['cumul_OD_INDUSTRIE_ONLINE_N_1']) * 100).round(2)
+        result['cumul_TP_CA_AFKL_ONLINE_N_1'] = (
+                (result['cumul_CA_AFKL_ONLINE_N_1'] / result['cumul_CA_INDUSTRIE_ONLINE_N_1']) * 100).round(2)
+
+        result['cumul_RR_OD_AFKL_N'] = ((result['cumul_OD_AFKL_N'] / result['cumul_OD_AFKL_N_1'] - 1) * 100).round(2)
+        result['cumul_RR_CA_AFKL_N'] = ((result['cumul_CA_AFKL_N'] / result['cumul_CA_AFKL_N_1'] - 1) * 100).round(2)
+        result['cumul_RR_OD_INDUSTRIE_N'] = (
+                (result['cumul_OD_INDUSTRIE_N'] / result['cumul_OD_INDUSTRIE_N_1'] - 1) * 100).round(2)
+        result['cumul_RR_CA_INDUSTRIE_N'] = (
+                (result['cumul_CA_INDUSTRIE_N'] / result['cumul_CA_INDUSTRIE_N_1'] - 1) * 100).round(2)
+
+        result['cumul_EVOL_TP_OD'] = (result['cumul_TP_OD_AFKL_N'] - result['cumul_TP_OD_AFKL_N_1']).round(2)
+        result['cumul_EVOL_TP_CA'] = (result['cumul_TP_CA_AFKL_N'] - result['cumul_TP_CA_AFKL_N_1']).round(2)
+
+        columns_to_drop = [
+            'CA GROUPE AF KL_N', 'CA TOTAL INDUSTRIE_N', 'NB O&D GROUPE AF KL_N', 'NB O&D INDUSTRIE_N',
+            'CA GROUPE AF KL_N_1', 'CA TOTAL INDUSTRIE_N_1', 'NB O&D GROUPE AF KL_N_1', 'NB O&D INDUSTRIE_N_1'
+        ]
+
+        result = result.drop(columns=columns_to_drop)
+
+        # Save the result to a new CSV file
+        output_path = f'csv/res/flight/flight_RR_cumul_{id_soc}.csv'
+        result.to_csv(output_path, index=False)
+
+def calculate_rr_flight_current(id_soc):
+    # Charger les données
+    df = pd.read_csv(f"csv/res/flight/grouped_flight_{id_soc}.csv")
+
+    # Convertir la colonne "DATE D'EMISSION" en datetime
+    df["DATE D'EMISSION"] = pd.to_datetime(df["DATE D'EMISSION"], format='%Y%m')
+
+    # Convertir les colonnes "ODLIST" et "IATA EMETTEUR" en texte pour les exclure des calculs numériques
+    df['ODLIST'] = df['ODLIST'].astype(str)
+    df['IATA EMETTEUR'] = df['IATA EMETTEUR'].astype(str)
+
+    # Obtenir l'année en cours et le mois précédent
+    current_year = datetime.now().year
+    last_month = datetime.now().month - 1
+    if last_month == 0:
+        last_month = 12
+        current_year -= 1
+
+    # Définir les périodes de filtre
+    start_date_last_month = f"{current_year}-{last_month:02d}-01"
+    end_date_last_month = f"{current_year}-{last_month:02d}-28"
+
+    start_date_last_month_n_1 = f"{current_year - 1}-{last_month:02d}-01"
+    end_date_last_month_n_1 = f"{current_year - 1}-{last_month:02d}-28"
+
+    # Filtrer les données pour le mois dernier (N) et le mois équivalent de l'année précédente (N-1)
+    df_n = df[
+        (df["DATE D'EMISSION"] >= start_date_last_month) &
+        (df["DATE D'EMISSION"] <= end_date_last_month) &
+        (df['ODLIST'] == '2024')
+        ]
+    df_n_1 = df[
+        (df["DATE D'EMISSION"] >= start_date_last_month_n_1) &
+        (df["DATE D'EMISSION"] <= end_date_last_month_n_1) &
+        (df['ODLIST'] == '2023')
+        ]
+
+    # Filtrer les données pour "Online"
+    df_n_online = df_n[df_n["TYPE DE VENTE"] == "Online"]
+    df_n_1_online = df_n_1[df_n_1["TYPE DE VENTE"] == "Online"]
+
+    # Group by the specified columns (exclure "ODLIST" et "IATA EMETTEUR")
+    grouped_columns = [
+        'O&D', 'ZONE ORIGINE', 'PERIMETRE', 'LIBELLE ORIGINE', 'LIBELLE DESTINATION',
+        'CODE ORIGINE', 'CODE DESTINATION', 'REFERENCE AF', 'RAISON SOCIALE'
+    ]
+
+    # Effectuer les opérations d'agrégation uniquement sur les colonnes numériques
+    numeric_columns = df_n.select_dtypes(include=['number']).columns
+
+    grouped_n = df_n.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+    grouped_n_1 = df_n_1.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+
+    # Grouper les données "Online"
+    grouped_n_online = df_n_online.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+    grouped_n_1_online = df_n_1_online.groupby(grouped_columns)[numeric_columns].sum().reset_index()
+
+    # Merge the results for both years to ensure they align properly
+    result = pd.merge(grouped_n, grouped_n_1, on=grouped_columns, how='outer', suffixes=('_N', '_N_1')).fillna(0)
+    result_online = pd.merge(grouped_n_online, grouped_n_1_online, on=grouped_columns, how='outer',
+                             suffixes=('_N', '_N_1')).fillna(0)
+
+    # Calculs des colonnes currentées avant de procéder aux autres calculs
+    result['current_OD_AFKL_N'] = result['NB O&D GROUPE AF KL_N']
+    result['current_CA_AFKL_N'] = result['CA GROUPE AF KL_N']
+    result['current_OD_INDUSTRIE_N'] = result['NB O&D INDUSTRIE_N']
+    result['current_CA_INDUSTRIE_N'] = result['CA TOTAL INDUSTRIE_N']
+
+    result['current_OD_AFKL_N_1'] = result['NB O&D GROUPE AF KL_N_1']
+    result['current_CA_AFKL_N_1'] = result['CA GROUPE AF KL_N_1']
+    result['current_OD_INDUSTRIE_N_1'] = result['NB O&D INDUSTRIE_N_1']
+    result['current_CA_INDUSTRIE_N_1'] = result['CA TOTAL INDUSTRIE_N_1']
+
+    # Calcul des colonnes pour "Online"
+    result['current_OD_AFKL_ONLINE_N'] = result_online['NB O&D GROUPE AF KL_N']
+    result['current_CA_AFKL_ONLINE_N'] = result_online['CA GROUPE AF KL_N']
+    result['current_OD_INDUSTRIE_ONLINE_N'] = result_online['NB O&D INDUSTRIE_N']
+    result['current_CA_INDUSTRIE_ONLINE_N'] = result_online['CA TOTAL INDUSTRIE_N']
+
+    result['current_OD_AFKL_ONLINE_N_1'] = result_online['NB O&D GROUPE AF KL_N_1']
+    result['current_CA_AFKL_ONLINE_N_1'] = result_online['CA GROUPE AF KL_N_1']
+    result['current_OD_INDUSTRIE_ONLINE_N_1'] = result_online['NB O&D INDUSTRIE_N_1']
+    result['current_CA_INDUSTRIE_ONLINE_N_1'] = result_online['CA TOTAL INDUSTRIE_N_1']
+
+    # Adding the new calculated columns with the specified formulas for TP and RR
+    result['current_TP_OD_AFKL_N'] = ((result['current_OD_AFKL_N'] / result['current_OD_INDUSTRIE_N']) * 100).round(2)
+    result['current_TP_CA_AFKL_N'] = ((result['current_CA_AFKL_N'] / result['current_CA_INDUSTRIE_N']) * 100).round(2)
+    result['current_TP_OD_AFKL_ONLINE_N'] = (
+            (result['current_OD_AFKL_ONLINE_N'] / result['current_OD_INDUSTRIE_ONLINE_N']) * 100).round(2)
+    result['current_TP_CA_AFKL_ONLINE_N'] = (
+            (result['current_CA_AFKL_ONLINE_N'] / result['current_CA_INDUSTRIE_ONLINE_N']) * 100).round(2)
+
+    result['current_TP_OD_AFKL_N_1'] = (
+                (result['current_OD_AFKL_N_1'] / result['current_OD_INDUSTRIE_N_1']) * 100).round(2)
+    result['current_TP_CA_AFKL_N_1'] = (
+                (result['current_CA_AFKL_N_1'] / result['current_CA_INDUSTRIE_N_1']) * 100).round(2)
+    result['current_TP_OD_AFKL_ONLINE_N_1'] = (
+            (result['current_OD_AFKL_ONLINE_N_1'] / result['current_OD_INDUSTRIE_ONLINE_N_1']) * 100).round(2)
+    result['current_TP_CA_AFKL_ONLINE_N_1'] = (
+            (result['current_CA_AFKL_ONLINE_N_1'] / result['current_CA_INDUSTRIE_ONLINE_N_1']) * 100).round(2)
+
+    result['current_RR_OD_AFKL_N'] = ((result['current_OD_AFKL_N'] / result['current_OD_AFKL_N_1'] - 1) * 100).round(2)
+    result['current_RR_CA_AFKL_N'] = ((result['current_CA_AFKL_N'] / result['current_CA_AFKL_N_1'] - 1) * 100).round(2)
+    result['current_RR_OD_INDUSTRIE_N'] = (
+            (result['current_OD_INDUSTRIE_N'] / result['current_OD_INDUSTRIE_N_1'] - 1) * 100).round(2)
+    result['current_RR_CA_INDUSTRIE_N'] = (
+            (result['current_CA_INDUSTRIE_N'] / result['current_CA_INDUSTRIE_N_1'] - 1) * 100).round(2)
+
+    result['current_EVOL_TP_OD'] = (result['current_TP_OD_AFKL_N'] - result['current_TP_OD_AFKL_N_1']).round(2)
+    result['current_EVOL_TP_CA'] = (result['current_TP_CA_AFKL_N'] - result['current_TP_CA_AFKL_N_1']).round(2)
+
+
+    columns_to_drop = [
+        'CA GROUPE AF KL_N', 'CA TOTAL INDUSTRIE_N', 'NB O&D GROUPE AF KL_N', 'NB O&D INDUSTRIE_N',
+        'CA GROUPE AF KL_N_1', 'CA TOTAL INDUSTRIE_N_1', 'NB O&D GROUPE AF KL_N_1', 'NB O&D INDUSTRIE_N_1'
+    ]
+
+    result = result.drop(columns=columns_to_drop)
+
+    # result["DATE D'EMISSION"] = result["DATE D'EMISSION"].dt.strftime('%Y%m')
+
+    # Save the result to a new CSV file
+    output_path = f'csv/res/flight/flight_RR_current_{id_soc}.csv'
+    result.to_csv(output_path, index=False)
+
+def merge_current_cumul(id_soc):
+    file_cumul = f"csv/res/flight/flight_RR_cumul_{id_soc}.csv"
+    file_current = f"csv/res/flight/flight_RR_current_{id_soc}.csv"
+
+    # Lire les fichiers en DataFrames
+    df_cumul = pd.read_csv(file_cumul)
+    df_current = pd.read_csv(file_current)
+
+    # Perform the merge using 'O&D' and 'ODLIST' as keys
+    merged_df = pd.merge(df_cumul, df_current, on=['O&D'], how='left', suffixes=('', '_cumul'))
+
+    # Drop duplicated columns that exist in both dataframes from the cumulative data (after merging)
+    merged_df = merged_df.loc[:, ~merged_df.columns.duplicated()]
+
+    # Enregistrer le DataFrame fusionné dans un nouveau fichier Excel
+    output_path = f"csv/res/flight/flight_RR_merged_{id_soc}.csv"
+    merged_df.to_csv(output_path, index=False)
 def merge_rr(id_soc):
     import pandas as pd
 
     # Load grouped_flight_rr and filtered_flight datasets
-    grouped_flight_rr = pd.read_csv(f'csv/res/flight/grouped_flight_with_rr_{id_soc}.csv')
+    grouped_flight_rr = pd.read_csv(f'csv/res/flight/flight_RR_merged_{id_soc}.csv')
 
     # Initialize new columns for the required details
     grouped_flight_rr['HAUL_TYPE'] = None
@@ -1157,28 +1413,32 @@ def merge_rr(id_soc):
     grouped_flight_rr[['ORI', 'DEST']] = grouped_flight_rr['O&D'].str.split(n=1, expand=True)
 
 
-    grouped_flight_rr.to_csv(f'csv/res/flight/grouped_flight_full_{id_soc}.csv', index=False)
+    grouped_flight_rr.to_csv(f'csv/res/flight/flight_full_{id_soc}.csv', index=False)
 
 def split_final(id_soc):
     import pandas as pd
 
     # Load the input CSV files
-    df0 = pd.read_csv(f"csv/res/flight/grouped_flight_with_rr_{id_soc}.csv")
-    df1 = pd.read_csv(f"csv/res/flight/grouped_flight_full_{id_soc}.csv")
+    df = pd.read_csv(f"csv/res/flight/flight_full_{id_soc}.csv")
 
-    # Merge df0 and df1 based on the common columns
-    df = pd.merge(df0, df1, how='inner', on=[col for col in df0.columns if col in df1.columns])
     # Define the desired column order
     columns_order = [
         'O&D', 'ANNEX_C', 'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION', 'COUNTRY_OF_DEST',
-        'HAUL_TYPE', 'ORIGIN_AREA', 'CA TOTAL INDUSTRIE_N', 'RR_CA TOTAL INDUSTRIE',
-        'NB O&D INDUSTRIE_N', 'RR_NB O&D INDUSTRIE', 'CA GROUPE AF KL_N', 'RR_CA GROUPE AF KL',
-        'NB O&D GROUPE AF KL_N', 'RR_NB O&D GROUPE AF KL', 'TP_CA_AF_KL', 'TP_CA_AF_KL_ONLINE',
-        'EVOL_TP_CA', 'TP_OD_AF_KL', 'TP_OD_AF_KL_ONLINE', 'EVOL_TP_OD', 'cumul_CA_TOTAL_INDUSTRIE',
-        'cumul_RR_CA TOTAL INDUSTRIE', 'cumul_NB_O&D_INDUSTRIE', 'cumul_RR_NB O&D INDUSTRIE',
-        'cumul_CA_GROUPE_AF_KL', 'cumul_RR_CA GROUPE AF KL', 'cumul_NB_O&D_GROUPE_AF_KL',
-        'cumul_RR_NB O&D GROUPE AF KL', 'cumul_TP_CA_AF_KL', 'cumul_TP_CA_AF_KL_ONLINE',
-        'cumul_EVOL_TP_CA', 'cumul_TP_OD_AF_KL', 'cumul_TP_OD_AF_KL_ONLINE', 'cumul_EVOL_TP_OD'
+        'HAUL_TYPE', 'ORIGIN_AREA',
+
+        'current_CA_INDUSTRIE_N', 'current_RR_CA_INDUSTRIE_N',
+        'current_OD_INDUSTRIE_N', 'current_RR_OD_INDUSTRIE_N',
+        'current_CA_AFKL_N', 'current_RR_CA_AFKL_N',
+        'current_OD_AFKL_N', 'current_RR_OD_AFKL_N',
+        'current_TP_CA_AFKL_N', 'current_TP_CA_AFKL_ONLINE_N','current_EVOL_TP_CA',
+        'current_TP_OD_AFKL_N', 'current_TP_OD_AFKL_ONLINE_N', 'current_EVOL_TP_OD',
+
+        'cumul_CA_INDUSTRIE_N', 'cumul_RR_CA_INDUSTRIE_N',
+        'cumul_OD_INDUSTRIE_N', 'cumul_RR_OD_INDUSTRIE_N',
+        'cumul_CA_AFKL_N', 'cumul_RR_CA_AFKL_N',
+        'cumul_OD_AFKL_N', 'cumul_RR_OD_AFKL_N',
+        'cumul_TP_CA_AFKL_N', 'cumul_TP_CA_AFKL_ONLINE_N', 'cumul_EVOL_TP_CA',
+        'cumul_TP_OD_AFKL_N', 'cumul_TP_OD_AFKL_ONLINE_N', 'cumul_EVOL_TP_OD',
     ]
 
     # Split the DataFrame based on the 'ANNEX_C' column
@@ -1210,7 +1470,7 @@ def aggreg_flight(id_soc,name_orga):
     # Reorder the DataFrame
     df = df[columns_order]
     df = df.sort_values(by=['O&D', 'DATE D\'EMISSION'], ascending = [True, False])
-
+    df = df.drop(columns=['O&D'])
     # Save the result to a new CSV file
     df.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_air.xlsx",index = False)
 
@@ -1226,11 +1486,11 @@ def aggreg_train(id_soc,name_orga):
         'PAYS DESTINATION', 'IATA EMETTEUR', 'ZONE ORIGINE', 'CA', 'NB O&D'
     ]
 
-    # Reorder the columns for df_euro
     df_euro = df_euro.reindex(columns=columns_order)
-
-    # Reorder the columns for df_metro
     df_metro = df_metro.reindex(columns=columns_order)
+
+    df_metro = df_metro.drop(columns=['O&D',"Zone"])
+    df_euro = df_euro.drop(columns=['O&D',"Zone"])
 
     # Save the results to new CSV files
     df_euro.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_rail_euro.xlsx", index=False)
@@ -1311,21 +1571,21 @@ def calculate_rr_train(id_soc, df_name):
     df_aggregated[cols_to_round] = df_aggregated[cols_to_round].round(0)
 
     # Calculate the Rate of Change (RR) for CA and O&D
-    df_aggregated['RR_CA'] = (((df_aggregated['CA_last_month_N'] / df_aggregated['CA_last_month_N_1']) - 1) * 100).round(2)
-    df_aggregated['RR_OD'] = (((df_aggregated['OD_last_month_N'] / df_aggregated['OD_last_month_N_1']) - 1) * 100).round(2)
+    df_aggregated['RR_CA'] = (((df_aggregated['CA_last_month_N'] / df_aggregated['CA_last_month_N_1']) - 1)*100).round(2)
+    df_aggregated['RR_OD'] = (((df_aggregated['OD_last_month_N'] / df_aggregated['OD_last_month_N_1']) - 1)*100).round(2)
 
     # Calculate the Cumulative Rate of Change (RR CUMUL) for CA and O&D
-    df_aggregated['cumul_RR_CA'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated['CA_jan_to_last_month_N_1']) - 1) * 100).round(2)
-    df_aggregated['cumul_RR_OD'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated['OD_jan_to_last_month_N_1']) - 1) * 100).round(2)
+    df_aggregated['cumul_RR_CA'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated['CA_jan_to_last_month_N_1']) - 1)*100).round(2)
+    df_aggregated['cumul_RR_OD'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated['OD_jan_to_last_month_N_1']) - 1)*100).round(2)
 
     # Calculate the total values for each metric
     total_values = df_aggregated[cols_to_round].sum()
 
     # Calculate the Rate of Change (RR) using total values
-    rr_od_last_month = ((total_values['OD_last_month_N'] / total_values['OD_last_month_N_1'] - 1) * 100).round(2)
-    rr_ca_last_month = ((total_values['CA_last_month_N'] / total_values['CA_last_month_N_1'] - 1) * 100).round(2)
-    rr_ca_jan_to_last_month = ((total_values['CA_jan_to_last_month_N'] / total_values['CA_jan_to_last_month_N_1'] - 1) * 100).round(2)
-    rr_od_jan_to_last_month = ((total_values['OD_jan_to_last_month_N'] / total_values['OD_jan_to_last_month_N_1'] - 1) * 100).round(2)
+    rr_od_last_month = ((total_values['OD_last_month_N'] / total_values['OD_last_month_N_1'] - 1)*100).round(2)
+    rr_ca_last_month = ((total_values['CA_last_month_N'] / total_values['CA_last_month_N_1'] - 1)*100).round(2)
+    rr_ca_jan_to_last_month = ((total_values['CA_jan_to_last_month_N'] / total_values['CA_jan_to_last_month_N_1'] - 1)*100).round(2)
+    rr_od_jan_to_last_month = ((total_values['OD_jan_to_last_month_N'] / total_values['OD_jan_to_last_month_N_1'] - 1)*100).round(2)
 
     # Create a DataFrame for the total row
     total_row = pd.DataFrame([{
@@ -1354,9 +1614,9 @@ def calculate_rr_train(id_soc, df_name):
     # Save the aggregated DataFrame with the total row to CSV
     df_aggregated.to_csv(f'csv/OK/total_{df_name}.csv', index=False)
 
-def total(id_soc):
+def total_old(id_soc):
     # Load the CSV file
-    file_path = f'csv/res/flight/grouped_flight_full_{id_soc}.csv'
+    file_path = f'csv/res/flight/flight_full_{id_soc}.csv'
     df = pd.read_csv(file_path)
 
     # Reorganize columns: move columns ending with "_N_1" to the end
@@ -1371,246 +1631,233 @@ def total(id_soc):
     grouped_totals = df_reorganized.groupby('ANNEX_C').sum(numeric_only=True).reset_index()
 
     # TP Ratios for cumulative columns
-    grouped_totals['cumul_TP_CA_AF_KL'] = (
-                grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE']).round(2)
-    grouped_totals['cumul_TP_CA_AF_KL_N_1'] = (
-                grouped_totals['cumul_CA_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE_N_1']).round(2)
-    grouped_totals['cumul_TP_OD_AF_KL'] = (
-                grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_INDUSTRIE']).round(2)
-    grouped_totals['cumul_TP_OD_AF_KL_N_1'] = (
-                grouped_totals['cumul_NB_O&D_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_NB_O&D_INDUSTRIE_N_1']).round(2)
+    grouped_totals['cumul_TP_CA_AFKL_N'] = ((grouped_totals['cumul_CA_AFKL_N'] / grouped_totals['cumul_CA_INDUSTRIE_N'])*100).round(2)
+    grouped_totals['cumul_TP_CA_AFKL_N_1'] = ((grouped_totals['cumul_CA_AFKL_N_1'] / grouped_totals['cumul_CA_INDUSTRIE_N_1'])*100).round(2)
+    grouped_totals['cumul_TP_OD_AFKL_N'] = ((grouped_totals['cumul_OD_AFKL_N'] / grouped_totals['cumul_OD_INDUSTRIE_N'])*100).round(2)
+    grouped_totals['cumul_TP_OD_AFKL_N_1'] = ((grouped_totals['cumul_OD_AFKL_N_1'] / grouped_totals['cumul_OD_INDUSTRIE_N_1'])*100).round(2)
 
     # Evolution calculation for cumulative values
-    grouped_totals['cumul_EVOL_TP_CA'] = (
-                grouped_totals['cumul_TP_CA_AF_KL'] - grouped_totals['cumul_TP_CA_AF_KL_N_1']).round(2)
-    grouped_totals['cumul_EVOL_TP_OD'] = (
-                grouped_totals['cumul_TP_OD_AF_KL'] - grouped_totals['cumul_TP_OD_AF_KL_N_1']).round(2)
-
-
+    grouped_totals['cumul_EVOL_TP_CA'] = (grouped_totals['cumul_TP_CA_AFKL_N'] - grouped_totals['cumul_TP_CA_AFKL_N_1']).round(2)
+    grouped_totals['cumul_EVOL_TP_OD'] = (grouped_totals['cumul_TP_OD_AFKL_N'] - grouped_totals['cumul_TP_OD_AFKL_N_1']).round(2)
 
     # Calculate the subtotals RR for each ANNEX_C group
-    grouped_totals['RR_CA GROUPE AF KL'] = (((grouped_totals['CA GROUPE AF KL_N'] / grouped_totals['CA GROUPE AF KL_N_1']) - 1) * 100).round(2)
-    grouped_totals['RR_NB O&D GROUPE AF KL'] = (((grouped_totals['NB O&D GROUPE AF KL_N'] / grouped_totals['NB O&D GROUPE AF KL_N_1']) - 1) * 100).round(2)
-    grouped_totals['RR_CA TOTAL INDUSTRIE'] = (((grouped_totals['CA TOTAL INDUSTRIE_N'] / grouped_totals['CA TOTAL INDUSTRIE_N_1']) - 1) * 100).round(2)
-    grouped_totals['RR_NB O&D INDUSTRIE'] = (((grouped_totals['NB O&D INDUSTRIE_N'] / grouped_totals['NB O&D INDUSTRIE_N_1']) - 1) * 100).round(2)
+    grouped_totals['cumul_RR_CA_AFKL_N'] = (((grouped_totals['cumul_CA_AFKL_N'] / grouped_totals['cumul_CA_AFKL_N_1']) - 1)*100).round(2)
+    grouped_totals['cumul_RR_OD_AFKL_N'] = (((grouped_totals['cumul_OD_AFKL_N'] / grouped_totals['cumul_OD_AFKL_N_1']) - 1)*100).round(2)
+    grouped_totals['cumul_RR_CA_INDUSTRIE_N'] = (((grouped_totals['cumul_CA_INDUSTRIE_N'] / grouped_totals['cumul_CA_INDUSTRIE_N_1']) - 1)*100).round(2)
+    grouped_totals['cumul_RR_OD_INDUSTRIE_N'] = (((grouped_totals['cumul_OD_INDUSTRIE_N'] / grouped_totals['cumul_OD_INDUSTRIE_N_1']) - 1)*100).round(2)
 
     # Calculate TP ratios for each ANNEX_C group
-    grouped_totals['TP_CA_AF_KL'] = (grouped_totals['CA GROUPE AF KL_N'] / grouped_totals['CA TOTAL INDUSTRIE_N']).round(2)
-    grouped_totals['TP_CA_AF_KL_N_1'] = (grouped_totals['CA GROUPE AF KL_N_1'] / grouped_totals['CA TOTAL INDUSTRIE_N_1']).round(2)
-    grouped_totals['TP_OD_AF_KL'] = (grouped_totals['NB O&D GROUPE AF KL_N'] / grouped_totals['NB O&D INDUSTRIE_N']).round(2)
-    grouped_totals['TP_OD_AF_KL_N_1'] = (grouped_totals['NB O&D GROUPE AF KL_N_1'] / grouped_totals['NB O&D INDUSTRIE_N_1']).round(2)
+    grouped_totals['cumul_TP_CA_AFKL_N'] = ((grouped_totals['cumul_CA_AFKL_N'] / grouped_totals['cumul_CA_INDUSTRIE_N'])*100).round(2)
+    grouped_totals['cumul_TP_CA_AFKL_N_1'] = ((grouped_totals['cumul_CA_AFKL_N_1'] / grouped_totals['cumul_CA_INDUSTRIE_N_1'])*100).round(2)
+    grouped_totals['cumul_TP_OD_AFKL_N'] = ((grouped_totals['cumul_OD_AFKL_N'] / grouped_totals['cumul_OD_INDUSTRIE_N'])*100).round(2)
+    grouped_totals['cumul_TP_OD_AFKL_N_1'] = ((grouped_totals['cumul_OD_AFKL_N_1'] / grouped_totals['cumul_OD_INDUSTRIE_N_1'])*100).round(2)
 
     # Evolution calculation
-    grouped_totals['EVOL_TP_CA'] = (grouped_totals['TP_CA_AF_KL'] - grouped_totals['TP_CA_AF_KL_N_1']).round(2)
-    grouped_totals['EVOL_TP_OD'] = (grouped_totals['TP_OD_AF_KL'] - grouped_totals['TP_OD_AF_KL_N_1']).round(2)
+    grouped_totals['cumul_EVOL_TP_CA'] = (grouped_totals['cumul_TP_CA_AFKL_N'] - grouped_totals['cumul_TP_CA_AFKL_N_1']).round(2)
+    grouped_totals['cumul_EVOL_TP_OD'] = (grouped_totals['cumul_TP_OD_AFKL_N'] - grouped_totals['cumul_TP_OD_AFKL_N_1']).round(2)
 
     # -----------------------------------
-    # Cumulative Calculations (Prefix: 'cumul_')
+    # Current Calculations (Prefix: 'current_')
     # -----------------------------------
 
-    # RR Calculations for cumulative columns
-    grouped_totals['cumul_RR_CA GROUPE AF KL'] = (((grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_GROUPE_AF_KL_N_1']) - 1) * 100).round(2)
-    grouped_totals['cumul_RR_NB O&D GROUPE AF KL'] = (((grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_GROUPE_AF_KL_N_1']) - 1) * 100).round(2)
-    grouped_totals['cumul_RR_CA TOTAL INDUSTRIE'] = (((grouped_totals['cumul_CA_TOTAL_INDUSTRIE'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE_N_1']) - 1) * 100).round(2)
-    grouped_totals['cumul_RR_NB O&D INDUSTRIE'] = (((grouped_totals['cumul_NB_O&D_INDUSTRIE'] / grouped_totals['cumul_NB_O&D_INDUSTRIE_N_1']) - 1) * 100).round(2)
+    # TP Ratios for currentative columns
+    grouped_totals['current_TP_CA_AFKL_N'] = (
+            grouped_totals['current_CA_AFKL_N'] / grouped_totals['current_CA_INDUSTRIE_N']).round(2)
+    grouped_totals['current_TP_CA_AFKL_N_1'] = (
+            grouped_totals['current_CA_AFKL_N_1'] / grouped_totals['current_CA_INDUSTRIE_N_1']).round(2)
+    grouped_totals['current_TP_OD_AFKL_N'] = (
+            grouped_totals['current_OD_AFKL_N'] / grouped_totals['current_OD_INDUSTRIE_N']).round(2)
+    grouped_totals['current_TP_OD_AFKL_N_1'] = (
+            grouped_totals['current_OD_AFKL_N_1'] / grouped_totals['current_OD_INDUSTRIE_N_1']).round(2)
 
-    # TP Ratios for cumulative columns
-    grouped_totals['cumul_TP_CA_AF_KL'] = (grouped_totals['cumul_CA_GROUPE_AF_KL'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE']).round(2)
-    grouped_totals['cumul_TP_CA_AF_KL_N_1'] = (grouped_totals['cumul_CA_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_CA_TOTAL_INDUSTRIE_N_1']).round(2)
-    grouped_totals['cumul_TP_OD_AF_KL'] = (grouped_totals['cumul_NB_O&D_GROUPE_AF_KL'] / grouped_totals['cumul_NB_O&D_INDUSTRIE']).round(2)
-    grouped_totals['cumul_TP_OD_AF_KL_N_1'] = (grouped_totals['cumul_NB_O&D_GROUPE_AF_KL_N_1'] / grouped_totals['cumul_NB_O&D_INDUSTRIE_N_1']).round(2)
+    # Evolution calculation for currentative values
+    grouped_totals['current_EVOL_TP_CA'] = (
+            grouped_totals['current_TP_CA_AFKL_N'] - grouped_totals['current_TP_CA_AFKL_N_1']).round(2)
+    grouped_totals['current_EVOL_TP_OD'] = (
+            grouped_totals['current_TP_OD_AFKL_N'] - grouped_totals['current_TP_OD_AFKL_N_1']).round(2)
 
-    # Evolution calculation for cumulative values
-    grouped_totals['cumul_EVOL_TP_CA'] = (grouped_totals['cumul_TP_CA_AF_KL'] - grouped_totals['cumul_TP_CA_AF_KL_N_1']).round(2)
-    grouped_totals['cumul_EVOL_TP_OD'] = (grouped_totals['cumul_TP_OD_AF_KL'] - grouped_totals['cumul_TP_OD_AF_KL_N_1']).round(2)
+    # Calculate the subtotals RR for each ANNEX_C group
+    grouped_totals['current_RR_CA_AFKL_N'] = (
+                ((grouped_totals['current_CA_AFKL_N'] / grouped_totals['current_CA_AFKL_N_1']) - 1) * 100).round(2)
+    grouped_totals['current_RR_OD_AFKL_N'] = (
+                ((grouped_totals['current_OD_AFKL_N'] / grouped_totals['current_OD_AFKL_N_1']) - 1) * 100).round(2)
+    grouped_totals['current_RR_CA_INDUSTRIE_N'] = (
+                ((grouped_totals['current_CA_INDUSTRIE_N'] / grouped_totals['current_CA_INDUSTRIE_N_1']) - 1) * 100).round(
+        2)
+    grouped_totals['current_RR_OD_INDUSTRIE_N'] = (
+                ((grouped_totals['current_OD_INDUSTRIE_N'] / grouped_totals['current_OD_INDUSTRIE_N_1']) - 1) * 100).round(
+        2)
 
-    # Calculate global total across all 'ANNEX_C' groups for numeric columns
-    global_totals_sum = grouped_totals.sum(numeric_only=True)
+    # Calculate TP ratios for each ANNEX_C group
+    grouped_totals['current_TP_CA_AFKL_N'] = (
+                (grouped_totals['current_CA_AFKL_N'] / grouped_totals['current_CA_INDUSTRIE_N']) * 100).round(2)
+    grouped_totals['current_TP_CA_AFKL_N_1'] = (
+                (grouped_totals['current_CA_AFKL_N_1'] / grouped_totals['current_CA_INDUSTRIE_N_1']) * 100).round(2)
+    grouped_totals['current_TP_OD_AFKL_N'] = (
+                (grouped_totals['current_OD_AFKL_N'] / grouped_totals['current_OD_INDUSTRIE_N']) * 100).round(2)
+    grouped_totals['current_TP_OD_AFKL_N_1'] = (
+                (grouped_totals['current_OD_AFKL_N_1'] / grouped_totals['current_OD_INDUSTRIE_N_1']) * 100).round(2)
 
-    # Recalculate TP, RR, and EVOL metrics for the global total
-    global_totals_sum['RR_CA GROUPE AF KL'] = (((global_totals_sum['CA GROUPE AF KL_N'] / global_totals_sum['CA GROUPE AF KL_N_1']) - 1) * 100).round(2)
-    global_totals_sum['RR_NB O&D GROUPE AF KL'] = (((global_totals_sum['NB O&D GROUPE AF KL_N'] / global_totals_sum['NB O&D GROUPE AF KL_N_1']) - 1) * 100).round(2)
-    global_totals_sum['RR_CA TOTAL INDUSTRIE'] = (((global_totals_sum['CA TOTAL INDUSTRIE_N'] / global_totals_sum['CA TOTAL INDUSTRIE_N_1']) - 1) * 100).round(2)
-    global_totals_sum['RR_NB O&D INDUSTRIE'] = (((global_totals_sum['NB O&D INDUSTRIE_N'] / global_totals_sum['NB O&D INDUSTRIE_N_1']) - 1) * 100).round(2)
-
-    global_totals_sum['TP_CA_AF_KL'] = (global_totals_sum['CA GROUPE AF KL_N'] / global_totals_sum['CA TOTAL INDUSTRIE_N']).round(2)
-    global_totals_sum['TP_CA_AF_KL_N_1'] = (global_totals_sum['CA GROUPE AF KL_N_1'] / global_totals_sum['CA TOTAL INDUSTRIE_N_1']).round(2)
-    global_totals_sum['EVOL_TP_CA'] = (global_totals_sum['TP_CA_AF_KL'] - global_totals_sum['TP_CA_AF_KL_N_1']).round(2)
-    global_totals_sum['TP_OD_AF_KL'] = (global_totals_sum['NB O&D GROUPE AF KL_N'] / global_totals_sum['NB O&D INDUSTRIE_N']).round(2)
-    global_totals_sum['TP_OD_AF_KL_N_1'] = (global_totals_sum['NB O&D GROUPE AF KL_N_1'] / global_totals_sum['NB O&D INDUSTRIE_N_1']).round(2)
-    global_totals_sum['EVOL_TP_OD'] = (global_totals_sum['TP_OD_AF_KL'] - global_totals_sum['TP_OD_AF_KL_N_1']).round(2)
-
-    # Add a row for the global total
-
-    global_totals_sum = grouped_totals.sum(numeric_only=True)
-    global_totals_sum['ANNEX_C'] = 'Total GLOBAL'  # Add the "Total GLOBAL" value to the "ANNEX_C" column
-
-    # Convert global_totals_sum to DataFrame and append it to the existing DataFrame
-    global_totals_sum_df = pd.DataFrame(global_totals_sum).T
-    grouped_totals = pd.concat([grouped_totals, global_totals_sum_df], ignore_index=True)
+    # Evolution calculation
+    grouped_totals['current_EVOL_TP_CA'] = (
+                grouped_totals['current_TP_CA_AFKL_N'] - grouped_totals['current_TP_CA_AFKL_N_1']).round(2)
+    grouped_totals['current_EVOL_TP_OD'] = (
+                grouped_totals['current_TP_OD_AFKL_N'] - grouped_totals['current_TP_OD_AFKL_N_1']).round(2)
 
     output_path = 'csv/OK/totals_flight.csv'
 
     grouped_totals.to_csv(output_path)
-import pandas as pd
 
-def total_global():
-    # Load the CSV file
-    file_path = f'csv/OK/totals_flight.csv'
-    df = pd.read_csv(file_path)
-    df = df[df['ANNEX_C'] != 'Total GLOBAL']
+import numpy as np
 
-    # Create a new row named "Total GLOBAL 2" with the specified calculations, rounded to 2 decimals
-    total_global_2 = {
-        'ANNEX_C': 'Total GLOBAL 2',
-        'CA TOTAL INDUSTRIE_N': df['CA TOTAL INDUSTRIE_N'].sum().round(2),
-        'RR_CA TOTAL INDUSTRIE': (((df['CA TOTAL INDUSTRIE_N'].sum() / df['CA TOTAL INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
-        'CA GROUPE AF KL_N': df['CA GROUPE AF KL_N'].sum().round(2),
-        'RR_CA GROUPE AF KL': (((df['CA GROUPE AF KL_N'].sum() / df['CA GROUPE AF KL_N_1'].sum()) - 1) * 100).round(2),
-        'NB O&D GROUPE AF KL_N': df['NB O&D GROUPE AF KL_N'].sum().round(2),
-        'RR_NB O&D GROUPE AF KL': (((df['NB O&D GROUPE AF KL_N'].sum() / df['NB O&D GROUPE AF KL_N_1'].sum()) - 1) * 100).round(2),
-        'NB O&D INDUSTRIE_N': df['NB O&D INDUSTRIE_N'].sum().round(2),
-        'RR_NB O&D INDUSTRIE': (((df['NB O&D INDUSTRIE_N'].sum() / df['NB O&D INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
-        'TP_CA_AF_KL': (df['CA GROUPE AF KL_N'].sum() / df['CA TOTAL INDUSTRIE_N'].sum()).round(2),
-        'TP_OD_AF_KL': (df['NB O&D GROUPE AF KL_N'].sum() / df['NB O&D INDUSTRIE_N'].sum()).round(2),
-        'CA_AF_KL_ONLINE': df['CA_AF_KL_ONLINE'].sum().round(2),
-        'OD_AF_KL_ONLINE': df['OD_AF_KL_ONLINE'].sum().round(2),
-        'CA_INDUSTRIE_ONLINE': df['CA_INDUSTRIE_ONLINE'].sum().round(2),
-        'OD_INDUSTRIE_ONLINE': df['OD_INDUSTRIE_ONLINE'].sum().round(2),
-        'TP_CA_AF_KL_ONLINE': (df['CA_AF_KL_ONLINE'].sum() / df['CA_INDUSTRIE_ONLINE'].sum()).round(2),
-        'TP_OD_AF_KL_ONLINE': (df['OD_AF_KL_ONLINE'].sum() / df['OD_INDUSTRIE_ONLINE'].sum()).round(2),
-        'EVOL_TP_CA': ((df['CA GROUPE AF KL_N'].sum() / df['CA TOTAL INDUSTRIE_N'].sum()) / (df['CA GROUPE AF KL_N_1'].sum() / df['CA TOTAL INDUSTRIE_N_1'].sum())).round(2),
-        'EVOL_TP_OD': ((df['NB O&D GROUPE AF KL_N'].sum() / df['NB O&D INDUSTRIE_N'].sum()) / (df['NB O&D GROUPE AF KL_N_1'].sum() / df['NB O&D INDUSTRIE_N_1'].sum())).round(2),
-        'cumul_CA_TOTAL_INDUSTRIE': df['cumul_CA_TOTAL_INDUSTRIE'].sum().round(2),
-        'cumul_CA_GROUPE_AF_KL': df['cumul_CA_GROUPE_AF_KL'].sum().round(2),
-        'cumul_NB_O&D_GROUPE_AF_KL': df['cumul_NB_O&D_GROUPE_AF_KL'].sum().round(2),
-        'cumul_NB_O&D_INDUSTRIE': df['cumul_NB_O&D_INDUSTRIE'].sum().round(2),
-        'cumul_TP_CA_AF_KL': (df['cumul_CA_GROUPE_AF_KL'].sum() / df['cumul_CA_TOTAL_INDUSTRIE'].sum()).round(2),
+def total(id_soc):
+    # Load the uploaded CSV file
+    full_file_path = f'csv/res/flight/flight_full_{id_soc}.csv'
 
-        'cumul_TP_OD_AF_KL': (df['cumul_NB_O&D_GROUPE_AF_KL'].sum() / df['cumul_NB_O&D_INDUSTRIE'].sum()).round(2),
+    # Read the CSV file into a dataframe
+    df_full = pd.read_csv(full_file_path)
 
-        'cumul_RR_CA TOTAL INDUSTRIE': (((df['cumul_CA_TOTAL_INDUSTRIE'].sum() / df['cumul_CA_TOTAL_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
+    # Split the dataframe by 'PERIMETRE' into separate dataframes
+    perimetre_groups = df_full.groupby('PERIMETRE')
 
-        'cumul_RR_NB O&D INDUSTRIE': (((df['cumul_NB_O&D_INDUSTRIE'].sum() / df['cumul_NB_O&D_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
+    # Define a function to calculate totals for the given columns based on the specified rules
+    def calculate_custom_totals(df):
+        totals = {}
+        # Calculate specific totals according to given rules
+        def safe_divide(numerator, denominator):
+            return (numerator / denominator * 100).round(2) if denominator != 0 else np.nan
 
-        'cumul_RR_CA GROUPE AF KL': (((df['cumul_CA_GROUPE_AF_KL'].sum() / df['cumul_CA_GROUPE_AF_KL_N_1'].sum()) - 1) * 100).round(2),
-        'cumul_RR_NB O&D GROUPE AF KL': (((df['cumul_NB_O&D_GROUPE_AF_KL'].sum() / df['cumul_NB_O&D_GROUPE_AF_KL_N_1'].sum()) - 1) * 100).round(2),
+        # Calculs spécifiques pour les colonnes demandées (multiplication par 100 avant round)
+        totals['cumul_TP_CA_AFKL_N'] = safe_divide(df['cumul_CA_AFKL_N'].sum(), df['cumul_CA_INDUSTRIE_N'].sum())
+        totals['cumul_TP_CA_AFKL_N_1'] = safe_divide(df['cumul_CA_AFKL_N_1'].sum(), df['cumul_CA_INDUSTRIE_N_1'].sum())
+        totals['cumul_TP_OD_AFKL_N'] = safe_divide(df['cumul_OD_AFKL_N'].sum(), df['cumul_OD_INDUSTRIE_N'].sum())
+        totals['cumul_TP_OD_AFKL_N_1'] = safe_divide(df['cumul_OD_AFKL_N_1'].sum(), df['cumul_OD_INDUSTRIE_N_1'].sum())
+        totals['cumul_TP_CA_AFKL_ONLINE_N'] = safe_divide(df['cumul_CA_AFKL_ONLINE_N'].sum(), df['cumul_CA_INDUSTRIE_ONLINE_N'].sum())
+        totals['cumul_TP_CA_AFKL_ONLINE_N_1'] = safe_divide(df['cumul_CA_AFKL_ONLINE_N_1'].sum(), df['cumul_CA_INDUSTRIE_ONLINE_N_1'].sum())
+        totals['cumul_TP_OD_AFKL_ONLINE_N'] = safe_divide(df['cumul_OD_AFKL_ONLINE_N'].sum(), df['cumul_OD_INDUSTRIE_ONLINE_N'].sum())
+        totals['cumul_TP_OD_AFKL_ONLINE_N_1'] = safe_divide(df['cumul_OD_AFKL_ONLINE_N_1'].sum(), df['cumul_OD_INDUSTRIE_ONLINE_N_1'].sum())
 
-        'cumul_EVOL_TP_CA': ((df['cumul_CA_GROUPE_AF_KL'].sum() / df['cumul_CA_TOTAL_INDUSTRIE'].sum()) - (df['cumul_CA_GROUPE_AF_KL_N_1'].sum() / df['cumul_CA_TOTAL_INDUSTRIE_N_1'].sum())).round(2),
+        totals['cumul_EVOL_TP_CA'] = (totals['cumul_TP_CA_AFKL_N'] - totals['cumul_TP_CA_AFKL_N_1']).round(2) if not np.isnan(totals['cumul_TP_CA_AFKL_N_1']) else np.nan
+        totals['cumul_EVOL_TP_OD'] = (totals['cumul_TP_OD_AFKL_N'] - totals['cumul_TP_OD_AFKL_N_1']).round(2) if not np.isnan(totals['cumul_TP_OD_AFKL_N_1']) else np.nan
 
-        'cumul_EVOL_TP_OD': ((df['cumul_NB_O&D_GROUPE_AF_KL'].sum() / df['cumul_NB_O&D_INDUSTRIE'].sum()) - (df['cumul_NB_O&D_GROUPE_AF_KL_N_1'].sum() / df['cumul_NB_O&D_INDUSTRIE_N_1'].sum())).round(2),
+        totals['cumul_RR_CA_AFKL_N'] = (safe_divide(df['cumul_CA_AFKL_N'].sum(), df['cumul_CA_AFKL_N_1'].sum()) - 100) if df['cumul_CA_AFKL_N_1'].sum() != 0 else np.nan
+        totals['cumul_RR_OD_AFKL_N'] = (safe_divide(df['cumul_OD_AFKL_N'].sum(), df['cumul_OD_AFKL_N_1'].sum()) - 100) if df['cumul_OD_AFKL_N_1'].sum() != 0 else np.nan
+        totals['cumul_RR_CA_INDUSTRIE_N'] = (safe_divide(df['cumul_CA_INDUSTRIE_N'].sum(), df['cumul_CA_INDUSTRIE_N_1'].sum()) - 100) if df['cumul_CA_INDUSTRIE_N_1'].sum() != 0 else np.nan
+        totals['cumul_RR_OD_INDUSTRIE_N'] = (safe_divide(df['cumul_OD_INDUSTRIE_N'].sum(), df['cumul_OD_INDUSTRIE_N_1'].sum()) - 100) if df['cumul_OD_INDUSTRIE_N_1'].sum() != 0 else np.nan
 
-        'cumul_TP_CA_AF_KL_ONLINE': (df['CA_AF_KL_ONLINE'].sum() / df['cumul_CA_TOTAL_INDUSTRIE'].sum()).round(2),
-        'cumul_TP_OD_AF_KL_ONLINE': (df['OD_AF_KL_ONLINE'].sum() / df['cumul_OD_INDUSTRIE_ONLINE'].sum()).round(2),
+        totals['current_TP_CA_AFKL_N'] = safe_divide(df['current_CA_AFKL_N'].sum(), df['current_CA_INDUSTRIE_N'].sum())
+        totals['current_TP_CA_AFKL_N_1'] = safe_divide(df['current_CA_AFKL_N_1'].sum(), df['current_CA_INDUSTRIE_N_1'].sum())
+        totals['current_TP_OD_AFKL_N'] = safe_divide(df['current_OD_AFKL_N'].sum(), df['current_OD_INDUSTRIE_N'].sum())
+        totals['current_TP_OD_AFKL_N_1'] = safe_divide(df['current_OD_AFKL_N_1'].sum(), df['current_OD_INDUSTRIE_N_1'].sum())
+        totals['current_TP_CA_AFKL_ONLINE_N'] = safe_divide(df['current_CA_AFKL_ONLINE_N'].sum(),df['current_CA_INDUSTRIE_ONLINE_N'].sum())
+        totals['current_TP_CA_AFKL_ONLINE_N_1'] = safe_divide(df['current_CA_AFKL_ONLINE_N_1'].sum(),df['current_CA_INDUSTRIE_ONLINE_N_1'].sum())
+        totals['current_TP_OD_AFKL_ONLINE_N'] = safe_divide(df['current_OD_AFKL_ONLINE_N'].sum(),df['current_OD_INDUSTRIE_ONLINE_N'].sum())
+        totals['current_TP_OD_AFKL_ONLINE_N_1'] = safe_divide(df['current_OD_AFKL_ONLINE_N_1'].sum(),df['current_OD_INDUSTRIE_ONLINE_N_1'].sum())
 
-        'cumul_RR_NB O&D INDUSTRIE': (((df['cumul_NB_O&D_INDUSTRIE'].sum() / df['cumul_NB_O&D_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
+        totals['current_EVOL_TP_CA'] = (totals['current_TP_CA_AFKL_N'] - totals['current_TP_CA_AFKL_N_1']).round(2) if not np.isnan(totals['current_TP_CA_AFKL_N_1']) else np.nan
+        totals['current_EVOL_TP_OD'] = (totals['current_TP_OD_AFKL_N'] - totals['current_TP_OD_AFKL_N_1']).round(2) if not np.isnan(totals['current_TP_OD_AFKL_N_1']) else np.nan
 
-        'cumul_RR_CA GROUPE AF KL': (((df['cumul_CA_GROUPE_AF_KL'].sum() / df['cumul_CA_GROUPE_AF_KL_N_1'].sum()) - 1) * 100).round(2),
+        totals['current_RR_CA_AFKL_N'] = (safe_divide(df['current_CA_AFKL_N'].sum(), df['current_CA_AFKL_N_1'].sum()) - 100) if df['current_CA_AFKL_N_1'].sum() != 0 else np.nan
+        totals['current_RR_OD_AFKL_N'] = (safe_divide(df['current_OD_AFKL_N'].sum(), df['current_OD_AFKL_N_1'].sum()) - 100) if df['current_OD_AFKL_N_1'].sum() != 0 else np.nan
+        totals['current_RR_CA_INDUSTRIE_N'] = (safe_divide(df['current_CA_INDUSTRIE_N'].sum(), df['current_CA_INDUSTRIE_N_1'].sum()) - 100) if df['current_CA_INDUSTRIE_N_1'].sum() != 0 else np.nan
+        totals['current_RR_OD_INDUSTRIE_N'] = (safe_divide(df['current_OD_INDUSTRIE_N'].sum(), df['current_OD_INDUSTRIE_N_1'].sum()) - 100) if df['current_OD_INDUSTRIE_N_1'].sum() != 0 else np.nan
 
-        'cumul_RR_NB O&D GROUPE AF KL': (((df['cumul_NB_O&D_GROUPE_AF_KL'].sum() / df['cumul_NB_O&D_GROUPE_AF_KL_N_1'].sum()) - 1) * 100).round(2),
+        # Calcul de la somme pour les autres colonnes numériques non spécifiées
+        numeric_columns = df.select_dtypes(include=['number']).columns
+        for col in numeric_columns:
+            if col not in totals:
+                totals[col] = df[col].sum()
 
-        'cumul_TP_CA_AF_KL_N_1': (((df['cumul_CA_GROUPE_AF_KL_N_1'].sum() / df['cumul_CA_TOTAL_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
+        return totals
 
-        'cumul_TP_OD_AF_KL_N_1': (((df['cumul_NB_O&D_GROUPE_AF_KL_N_1'].sum() / df['cumul_NB_O&D_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
+    # Create an Excel writer object to save all 'PERIMETRE' specific dataframes with calculated totals
+    output_file_paths = []
 
-        'cumul_EVOL_TP_CA': ((df['cumul_CA_GROUPE_AF_KL'].sum() / df['cumul_CA_TOTAL_INDUSTRIE'].sum()).round(2))-(((df['cumul_CA_GROUPE_AF_KL_N_1'].sum() / df['cumul_CA_TOTAL_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2),
+    for perimetre, df_perimetre in perimetre_groups:
+        # Calculate custom totals for the specific columns
+        custom_totals = calculate_custom_totals(df_perimetre)
+        df_totals = pd.DataFrame([custom_totals])
 
-        'cumul_EVOL_OD_CA': ((df['cumul_NB_O&D_GROUPE_AF_KL'].sum() / df['cumul_NB_O&D_INDUSTRIE'].sum()).round(2))-((((df['cumul_NB_O&D_GROUPE_AF_KL_N_1'].sum() / df['cumul_NB_O&D_INDUSTRIE_N_1'].sum()) - 1) * 100).round(2)),
+        # Concatenate the dataframe with custom totals
+        df_with_totals = pd.concat([df_perimetre, df_totals], ignore_index=True)
 
-        'cumul_TP_CA_AF_KL_ONLINE': (((df['cumul_CA_AF_KL_ONLINE'].sum() / df['cumul_CA_INDUSTRIE_ONLINE'].sum()) - 1) * 100).round(2),
+        # Save each dataframe to a separate Excel file
+        output_file_path = f'csv/OK/{perimetre}.csv'
+        df_with_totals.to_csv(output_file_path, index=False)
+        output_file_paths.append(output_file_path)
 
-        'cumul_TP_OD_AF_KL_ONLINE': (((df['cumul_OD_AF_KL_ONLINE'].sum() / df['cumul_OD_INDUSTRIE_ONLINE'].sum()) - 1) * 100).round(2),
+    # Provide information on the generated files
+    return output_file_paths
 
-        "cumul_CA_TOTAL_INDUSTRIE_N_1" : df['cumul_CA_TOTAL_INDUSTRIE_N_1'].sum().round(2),
+def total_global(id_soc):
+    # Load the uploaded CSV file
+    full_file_path = f'csv/res/flight/flight_full_{id_soc}.csv'
 
-        "cumul_CA_GROUPE_AF_KL_N_1" : df['cumul_CA_GROUPE_AF_KL_N_1'].sum().round(2),
+    # Read the CSV file into a dataframe
+    df_full = pd.read_csv(full_file_path)
 
-        "cumul_NB_O&D_GROUPE_AF_KL_N_1" : df['cumul_NB_O&D_GROUPE_AF_KL_N_1'].sum().round(2),
+    # Define a function to calculate totals for the given columns based on the specified rules
+    def calculate_custom_totals(df):
+        totals = {}
+        # Calculate specific totals according to given rules
+        def safe_divide(numerator, denominator):
+            return (numerator / denominator * 100).round(2) if denominator != 0 else np.nan
 
-        "cumul_NB_O&D_INDUSTRIE_N_1" : df['cumul_NB_O&D_INDUSTRIE_N_1'].sum().round(2),
+        # Calculs spécifiques pour les colonnes demandées (multiplication par 100 avant round)
+        totals['cumul_TP_CA_AFKL_N'] = safe_divide(df['cumul_CA_AFKL_N'].sum(), df['cumul_CA_INDUSTRIE_N'].sum())
+        totals['cumul_TP_CA_AFKL_N_1'] = safe_divide(df['cumul_CA_AFKL_N_1'].sum(), df['cumul_CA_INDUSTRIE_N_1'].sum())
+        totals['cumul_TP_OD_AFKL_N'] = safe_divide(df['cumul_OD_AFKL_N'].sum(), df['cumul_OD_INDUSTRIE_N'].sum())
+        totals['cumul_TP_OD_AFKL_N_1'] = safe_divide(df['cumul_OD_AFKL_N_1'].sum(), df['cumul_OD_INDUSTRIE_N_1'].sum())
+        totals['cumul_TP_CA_AFKL_ONLINE_N'] = safe_divide(df['cumul_CA_AFKL_ONLINE_N'].sum(), df['cumul_CA_INDUSTRIE_ONLINE_N'].sum())
+        totals['cumul_TP_CA_AFKL_ONLINE_N_1'] = safe_divide(df['cumul_CA_AFKL_ONLINE_N_1'].sum(), df['cumul_CA_INDUSTRIE_ONLINE_N_1'].sum())
+        totals['cumul_TP_OD_AFKL_ONLINE_N'] = safe_divide(df['cumul_OD_AFKL_ONLINE_N'].sum(), df['cumul_OD_INDUSTRIE_ONLINE_N'].sum())
+        totals['cumul_TP_OD_AFKL_ONLINE_N_1'] = safe_divide(df['cumul_OD_AFKL_ONLINE_N_1'].sum(), df['cumul_OD_INDUSTRIE_ONLINE_N_1'].sum())
 
-        "cumul_CA_INDUSTRIE_ONLINE" : df['cumul_CA_INDUSTRIE_ONLINE'].sum().round(2),
+        totals['cumul_EVOL_TP_CA'] = (totals['cumul_TP_CA_AFKL_N'] - totals['cumul_TP_CA_AFKL_N_1']).round(2) if not np.isnan(totals['cumul_TP_CA_AFKL_N_1']) else np.nan
+        totals['cumul_EVOL_TP_OD'] = (totals['cumul_TP_OD_AFKL_N'] - totals['cumul_TP_OD_AFKL_N_1']).round(2) if not np.isnan(totals['cumul_TP_OD_AFKL_N_1']) else np.nan
 
-        "cumul_CA_AF_KL_ONLINE" : df['cumul_CA_AF_KL_ONLINE'].sum().round(2),
+        totals['cumul_RR_CA_AFKL_N'] = (safe_divide(df['cumul_CA_AFKL_N'].sum(), df['cumul_CA_AFKL_N_1'].sum()) - 100) if df['cumul_CA_AFKL_N_1'].sum() != 0 else np.nan
+        totals['cumul_RR_OD_AFKL_N'] = (safe_divide(df['cumul_OD_AFKL_N'].sum(), df['cumul_OD_AFKL_N_1'].sum()) - 100) if df['cumul_OD_AFKL_N_1'].sum() != 0 else np.nan
+        totals['cumul_RR_CA_INDUSTRIE_N'] = (safe_divide(df['cumul_CA_INDUSTRIE_N'].sum(), df['cumul_CA_INDUSTRIE_N_1'].sum()) - 100) if df['cumul_CA_INDUSTRIE_N_1'].sum() != 0 else np.nan
+        totals['cumul_RR_OD_INDUSTRIE_N'] = (safe_divide(df['cumul_OD_INDUSTRIE_N'].sum(), df['cumul_OD_INDUSTRIE_N_1'].sum()) - 100) if df['cumul_OD_INDUSTRIE_N_1'].sum() != 0 else np.nan
 
-        "cumul_OD_AF_KL_ONLINE" : df['cumul_OD_AF_KL_ONLINE'].sum().round(2),
+        totals['current_TP_CA_AFKL_N'] = safe_divide(df['current_CA_AFKL_N'].sum(), df['current_CA_INDUSTRIE_N'].sum())
+        totals['current_TP_CA_AFKL_N_1'] = safe_divide(df['current_CA_AFKL_N_1'].sum(), df['current_CA_INDUSTRIE_N_1'].sum())
+        totals['current_TP_OD_AFKL_N'] = safe_divide(df['current_OD_AFKL_N'].sum(), df['current_OD_INDUSTRIE_N'].sum())
+        totals['current_TP_OD_AFKL_N_1'] = safe_divide(df['current_OD_AFKL_N_1'].sum(), df['current_OD_INDUSTRIE_N_1'].sum())
+        totals['current_TP_CA_AFKL_ONLINE_N'] = safe_divide(df['current_CA_AFKL_ONLINE_N'].sum(), df['current_CA_INDUSTRIE_ONLINE_N'].sum())
+        totals['current_TP_CA_AFKL_ONLINE_N_1'] = safe_divide(df['current_CA_AFKL_ONLINE_N_1'].sum(), df['current_CA_INDUSTRIE_ONLINE_N_1'].sum())
+        totals['current_TP_OD_AFKL_ONLINE_N'] = safe_divide(df['current_OD_AFKL_ONLINE_N'].sum(), df['current_OD_INDUSTRIE_ONLINE_N'].sum())
+        totals['current_TP_OD_AFKL_ONLINE_N_1'] = safe_divide(df['current_OD_AFKL_ONLINE_N_1'].sum(), df['current_OD_INDUSTRIE_ONLINE_N_1'].sum())
 
-        "cumul_OD_INDUSTRIE_ONLINE" : df['cumul_OD_INDUSTRIE_ONLINE'].sum().round(2),
+        totals['current_EVOL_TP_CA'] = (totals['current_TP_CA_AFKL_N'] - totals['current_TP_CA_AFKL_N_1']).round(2) if not np.isnan(totals['current_TP_CA_AFKL_N_1']) else np.nan
+        totals['current_EVOL_TP_OD'] = (totals['current_TP_OD_AFKL_N'] - totals['current_TP_OD_AFKL_N_1']).round(2) if not np.isnan(totals['current_TP_OD_AFKL_N_1']) else np.nan
 
-    }
+        totals['current_RR_CA_AFKL_N'] = (safe_divide(df['current_CA_AFKL_N'].sum(), df['current_CA_AFKL_N_1'].sum()) - 100) if df['current_CA_AFKL_N_1'].sum() != 0 else np.nan
+        totals['current_RR_OD_AFKL_N'] = (safe_divide(df['current_OD_AFKL_N'].sum(), df['current_OD_AFKL_N_1'].sum()) - 100) if df['current_OD_AFKL_N_1'].sum() != 0 else np.nan
+        totals['current_RR_CA_INDUSTRIE_N'] = (safe_divide(df['current_CA_INDUSTRIE_N'].sum(), df['current_CA_INDUSTRIE_N_1'].sum()) - 100) if df['current_CA_INDUSTRIE_N_1'].sum() != 0 else np.nan
+        totals['current_RR_OD_INDUSTRIE_N'] = (safe_divide(df['current_OD_INDUSTRIE_N'].sum(), df['current_OD_INDUSTRIE_N_1'].sum()) - 100) if df['current_OD_INDUSTRIE_N_1'].sum() != 0 else np.nan
 
-    # Append the "Total GLOBAL 2" row to the dataframe
-    df = pd.concat([df, pd.DataFrame([total_global_2])], ignore_index=True)
+        # Calcul de la somme pour les autres colonnes numériques non spécifiées
+        numeric_columns = df.select_dtypes(include=['number']).columns
+        for col in numeric_columns:
+            if col not in totals:
+                totals[col] = df[col].sum()
 
-    # Calculate [TP_CA_AF_KL_ONLINE] for IAC, IHAC, MAC, MHAC as [CA_AF_KL_ONLINE] / [CA_INDUSTRIE_ONLINE]
-    df['TP_CA_AF_KL_ONLINE'] = (df['CA_AF_KL_ONLINE'] / df['CA_INDUSTRIE_ONLINE']).round(2)
+        return totals
 
-    # Calculate [TP_OD_AF_KL_ONLINE] for IAC, IHAC, MAC, MHAC as [OD_AF_KL_ONLINE] / [OD_INDUSTRIE_ONLINE]
-    df['TP_OD_AF_KL_ONLINE'] = (df['OD_AF_KL_ONLINE'] / df['OD_INDUSTRIE_ONLINE']).round(2)
+    # Calculate custom totals for the entire dataframe
+    custom_totals = calculate_custom_totals(df_full)
+    df_totals = pd.DataFrame([custom_totals])
 
-    df['cumul_TP_CA_AF_KL_ONLINE'] = (((df['cumul_CA_AF_KL_ONLINE'] / df['cumul_CA_INDUSTRIE_ONLINE']) - 1) * 100).round(2)
+    # Concatenate the dataframe with custom totals
+    df_with_totals = pd.concat([df_full, df_totals], ignore_index=True)
 
-    df['cumul_TP_OD_AF_KL_ONLINE'] = (((df['cumul_OD_AF_KL_ONLINE']/df['cumul_OD_INDUSTRIE_ONLINE'] ) - 1) * 100).round(2)
+    # Save the dataframe to an Excel file
+    output_file_path = f'csv/OK/total_flight.csv'
+    df_with_totals.to_csv(output_file_path, index=False)
 
-    # Save the updated DataFrame to CSV
-    output_path = 'csv/OK/totals_flight.csv'
-    df.to_csv(output_path, index=False)
-
-
-def merge_total_flight():
-    # Charger les 4 premières lignes de `totals_flight.csv`
-    totals_flight_path = 'csv/OK/totals_flight.csv'
-    totals_flight = pd.read_csv(totals_flight_path, nrows=4).reset_index(drop=True)
-
-    # Charger le fichier CSV approprié en fonction de la valeur de `ANNEX_C`
-    for annex_c_value in totals_flight['ANNEX_C'].unique():
-        # Charger le fichier correspondant à la valeur de ANNEX_C
-        file_name = f"csv/OK/{annex_c_value}.csv"
-        try:
-            df_annex = pd.read_csv(file_name)
-        except FileNotFoundError:
-            print(f"Fichier non trouvé : {file_name}")
-            continue
-
-        # Filtrer la ligne dans totals_flight pour cette valeur de 'ANNEX_C'
-        row_to_append = totals_flight[totals_flight['ANNEX_C'] == annex_c_value]
-
-        if not row_to_append.empty:
-            # Garder uniquement les colonnes à partir de 'ORIGIN_AREA'
-            try:
-                start_column_index = df_annex.columns.get_loc('ORIGIN_AREA')
-            except KeyError:
-                print(f"'ORIGIN_AREA' non trouvé dans les colonnes de {file_name}")
-                continue
-
-            columns_to_append = df_annex.columns[start_column_index:]
-
-            # Trouver l'intersection des colonnes à ajouter avec les colonnes disponibles dans row_to_append
-            columns_to_append = [col for col in columns_to_append if col in row_to_append.columns]
-
-            if not columns_to_append:
-                print(f"Aucune colonne correspondante trouvée pour ANNEX_C {annex_c_value} dans totals_flight")
-                continue
-
-            # S'assurer que seules les colonnes appropriées sont utilisées pour l'ajout
-            row_to_append = row_to_append[columns_to_append]
-
-            # Ajouter la ligne filtrée au DataFrame
-            df_annex = pd.concat([df_annex, row_to_append], ignore_index=True)
-
-            # Sauvegarder le DataFrame mis à jour dans le fichier CSV
-            df_annex.to_csv(file_name, index=False)
-
-            print(f"Ligne ajoutée au fichier {file_name}")
-
-from openpyxl.utils import get_column_letter
-import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment
-from datetime import datetime
-from openpyxl.styles.borders import Border, Side
-
-def create_excel():
+def create_excel_flight():
     # Load the CSV files into DataFrames
     iac_df = pd.read_csv('csv/OK/IAC.csv')
     ihac_df = pd.read_csv('csv/OK/IHAC.csv')
@@ -1625,165 +1872,173 @@ def create_excel():
             if column in df.columns:
                 df.drop(columns=[column], inplace=True)
 
-        # Drop rows where "cumul_CA_GROUPE_AF_KL" or "cumul_NB_O&D_GROUPE_AF_KL" are empty (NaN)
-    # for df in [iac_df, ihac_df, mac_df, mhac_df]:
-    #     df.dropna(subset=["cumul_CA_GROUPE_AF_KL", "cumul_NB_O&D_GROUPE_AF_KL"], inplace=True)
-
-    # Load the existing Excel file
-    excel_path = "const/template.xlsx"
-    workbook = load_workbook(excel_path)
-
-    # Select the worksheet "Etat 1.1"
-    sheet_name = "Etat 1.1"
-    if sheet_name in workbook.sheetnames:
-        sheet = workbook[sheet_name]
-    else:
-        print(f"Sheet '{sheet_name}' does not exist in the workbook.")
-        return
-
-    # Unmerge all cells in the sheet to handle 'MergedCell' issues
-    for merged_range in list(sheet.merged_cells.ranges):
-        sheet.unmerge_cells(str(merged_range))
-
-    # Define headers to be used for each table
-    headers = [
-        "ORI", "DEST", "DESTINATION", "ORIGINE", "CODE_PAYS", "TYPE_COURRIER", "ZONE_ORIGINE",
-        "CA", "R/R", "O&D", "R/R", "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE",
-        "EVOL T/P (CA)", "T/P O&D", "T/P O&D ONLINE", "EVOL T/P (O&D)", "CA", "R/R", "O&D", "R/R",
-        "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE", "EVOL T/P (CA)", "T/P O&D",
-        "T/P O&D ONLINE", "EVOL T/P (O&D)"
+    # List of columns to keep and reorder
+    columns_to_keep = [
+        'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION', 'COUNTRY_OF_DEST', 'HAUL_TYPE', 'ORIGIN_AREA',
+        'current_CA_INDUSTRIE_N', 'current_RR_CA_INDUSTRIE_N', 'current_OD_INDUSTRIE_N', 'current_RR_OD_INDUSTRIE_N',
+        'current_CA_AFKL_N', 'current_RR_CA_AFKL_N', 'current_OD_AFKL_N', 'current_RR_OD_AFKL_N',
+        'current_TP_CA_AFKL_N', 'current_TP_CA_AFKL_ONLINE_N', 'current_EVOL_TP_CA',
+        'current_TP_OD_AFKL_N', 'current_TP_OD_AFKL_ONLINE_N', 'current_EVOL_TP_OD',
+        'cumul_CA_INDUSTRIE_N', 'cumul_RR_CA_INDUSTRIE_N', 'cumul_OD_INDUSTRIE_N', 'cumul_RR_OD_INDUSTRIE_N',
+        'cumul_CA_AFKL_N', 'cumul_RR_CA_AFKL_N', 'cumul_OD_AFKL_N', 'cumul_RR_OD_AFKL_N',
+        'cumul_TP_CA_AFKL_N', 'cumul_TP_CA_AFKL_ONLINE_N', 'cumul_EVOL_TP_CA',
+        'cumul_TP_OD_AFKL_N', 'cumul_TP_OD_AFKL_ONLINE_N', 'cumul_EVOL_TP_OD'
     ]
 
-    # Define styles for headers, subtotals, top labels, date information, and borders
-    header_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
-    header_font = Font(bold=True, color="FFFFFF")  # White font
-    header_alignment = Alignment(horizontal="center", vertical="center")
+    # Filter and reorder columns for each DataFrame
+    filtered_dfs = []
+    for df in [iac_df, ihac_df, mac_df, mhac_df]:
+        df_filtered = df[[col for col in columns_to_keep if col in df.columns]]
+        filtered_dfs.append(df_filtered)
 
-    subtotal_fill = PatternFill(start_color="5c4292", end_color="5c4292", fill_type="solid")  # Red fill for subtotals
-    subtotal_font = Font(bold=True, color="FFFFFF")  # White font for subtotals, bold
-    subtotal_alignment = Alignment(horizontal="center", vertical="center")
+        # Load the existing Excel file
+        excel_path = "const/template.xlsx"
+        workbook = load_workbook(excel_path)
 
-    top_label_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
-    top_label_font = Font(bold=True, color="FFFFFF")  # White font for top labels
-    top_label_alignment = Alignment(horizontal="center", vertical="center")
+        # Select the worksheet "Etat 1.1"
+        sheet_name = "Etat 1.1"
+        if sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+        else:
+            print(f"Sheet '{sheet_name}' does not exist in the workbook.")
+            return
 
-    date_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
-    date_font = Font(bold=True, color="FFFFFF")  # White font for date labels
-    date_alignment = Alignment(horizontal="center", vertical="center")
+        # Unmerge all cells in the sheet to handle 'MergedCell' issues
+        for merged_range in list(sheet.merged_cells.ranges):
+            sheet.unmerge_cells(str(merged_range))
 
-    thin_border = Border(
-        left=Side(border_style="thin", color="262626"),
-        right=Side(border_style="thin", color="262626"),
-        top=Side(border_style="thin", color="262626"),
-        bottom=Side(border_style="thin", color="262626")
-    )
-
-    subtotals = ["SOUS TOTAL IAC", "SOUS TOTAL IHAC", "SOUS TOTAL MAC", "SOUS TOTAL MHAC"]
-
-    # Get the current date information
-    current_date = datetime.now()
-    current_year = current_date.year
-    last_month = current_date.month - 1 if current_date.month > 1 else 12
-    last_month_name = datetime(1900, last_month, 1).strftime('%B')
-    if last_month == 12:
-        current_year -= 1  # Adjust the year if the last month is December from the previous year
-
-    def write_dataframe_to_sheet(df, start_row, start_col, subtotal_text):
-        sheet.merge_cells(f"H{start_row}:U{start_row}")
-        last_month_label_cell = sheet["H" + str(start_row)]
-        last_month_label_cell.value = f"{last_month_name} {current_year}"
-        last_month_label_cell.fill = date_fill
-        last_month_label_cell.font = date_font
-        last_month_label_cell.alignment = date_alignment
-        last_month_label_cell.border = thin_border
-
-        # "Cumul de janvier à {last month} {current year}" from V to AI
-        sheet.merge_cells(f"V{start_row}:AI{start_row}")
-        cumulative_label_cell = sheet["V" + str(start_row)]
-        cumulative_label_cell.value = f"January {current_year} to {last_month_name} {current_year}"
-        cumulative_label_cell.fill = date_fill
-        cumulative_label_cell.font = date_font
-        cumulative_label_cell.alignment = date_alignment
-        cumulative_label_cell.border = thin_border
-
-        # Write top labels above headers (one row below the date labels)
-        label_ranges = [
-            ("Industrie", "H", "K"),
-            ("Groupe AF KL", "L", "O"),
-            ("% GROUPE AF KL", "P", "U"),
-            ("Industrie", "V", "Y"),
-            ("Groupe AF KL", "Z", "AC"),
-            ("% GROUPE AF KL", "AD", "AI")
+        # Define headers to be used for each table
+        headers = [
+            "ORI", "DEST", "DESTINATION", "ORIGINE", "CODE_PAYS", "TYPE_COURRIER", "ZONE_ORIGINE",
+            "CA", "R/R", "O&D", "R/R", "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE",
+            "EVOL T/P (CA)", "T/P O&D", "T/P O&D ONLINE", "EVOL T/P (O&D)", "CA", "R/R", "O&D", "R/R",
+            "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE", "EVOL T/P (CA)", "T/P O&D",
+            "T/P O&D ONLINE", "EVOL T/P (O&D)"
         ]
 
-        for label, start_col_letter, end_col_letter in label_ranges:
-            sheet.merge_cells(f"{start_col_letter}{start_row + 1}:{end_col_letter}{start_row + 1}")
-            top_label_cell = sheet[f"{start_col_letter}{start_row + 1}"]
-            top_label_cell.value = label
-            top_label_cell.fill = top_label_fill
-            top_label_cell.font = top_label_font
-            top_label_cell.alignment = top_label_alignment
-            top_label_cell.border = thin_border
+        # Define styles for headers, subtotals, top labels, date information, and borders
+        header_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+        header_font = Font(bold=True, color="FFFFFF")  # White font
+        header_alignment = Alignment(horizontal="center", vertical="center")
 
+        subtotal_fill = PatternFill(start_color="5c4292", end_color="5c4292",
+                                    fill_type="solid")  # Red fill for subtotals
+        subtotal_font = Font(bold=True, color="FFFFFF")  # White font for subtotals, bold
+        subtotal_alignment = Alignment(horizontal="center", vertical="center")
+        subtotal_value_font = Font(bold=True, color="000000")  # Black font for subtotal values, bold
 
-        # Write headers below the top labels
-        for col_idx, header in enumerate(headers, start=start_col):
-            cell = sheet.cell(row=start_row + 2, column=col_idx)
-            cell.value = header
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = header_alignment
-            cell.border = thin_border
+        date_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+        date_font = Font(bold=True, color="FFFFFF")  # White font for date labels
+        date_alignment = Alignment(horizontal="center", vertical="center")
 
-        # Write data below headers
-        for r_idx in range(len(df)):
-            for c_idx in range(len(df.columns)):
-                cell = sheet.cell(row=start_row + r_idx + 3, column=start_col + c_idx)
-                cell.value = df.iloc[r_idx, c_idx]
+        top_label_fill = PatternFill(start_color="9370DB", end_color="9370DB", fill_type="solid")  # Purple fill
+        top_label_font = Font(bold=True, color="FFFFFF")  # White font for top labels
+        top_label_alignment = Alignment(horizontal="center", vertical="center")
+
+        thin_border = Border(
+            left=Side(border_style="thin", color="262626"),
+            right=Side(border_style="thin", color="262626"),
+            top=Side(border_style="thin", color="262626"),
+            bottom=Side(border_style="thin", color="262626")
+        )
+
+        subtotals = ["SOUS TOTAL IAC", "SOUS TOTAL IHAC", "SOUS TOTAL MAC", "SOUS TOTAL MHAC"]
+
+        # Get the current date information
+        current_date = datetime.now()
+        current_year = current_date.year
+        last_month = current_date.month - 1 if current_date.month > 1 else 12
+        last_month_name = datetime(1900, last_month, 1).strftime('%B')
+        if last_month == 12:
+            current_year -= 1  # Adjust the year if the last month is December from the previous year
+
+        def write_dataframe_to_sheet(df, start_row, start_col, subtotal_text):
+            # Add two rows above headers for labels
+            # Last month label
+            sheet.merge_cells(f"H{start_row}:U{start_row}")
+            last_month_label_cell = sheet["H" + str(start_row)]
+            last_month_label_cell.value = f"{last_month_name} {current_year}"
+            last_month_label_cell.fill = date_fill
+            last_month_label_cell.font = date_font
+            last_month_label_cell.alignment = date_alignment
+            last_month_label_cell.border = thin_border
+
+            # Cumulative label from V to AI
+            sheet.merge_cells(f"V{start_row}:AI{start_row}")
+            cumulative_label_cell = sheet["V" + str(start_row)]
+            cumulative_label_cell.value = f"January {current_year} to {last_month_name} {current_year}"
+            cumulative_label_cell.fill = date_fill
+            cumulative_label_cell.font = date_font
+            cumulative_label_cell.alignment = date_alignment
+            cumulative_label_cell.border = thin_border
+
+            # Write top labels above headers (one row below the date labels)
+            label_ranges = [
+                ("Industrie", "H", "K"),
+                ("Groupe AF KL", "L", "O"),
+                ("% GROUPE AF KL", "P", "U"),
+                ("Industrie", "V", "Y"),
+                ("Groupe AF KL", "Z", "AC"),
+                ("% GROUPE AF KL", "AD", "AI")
+            ]
+
+            for label, start_col_letter, end_col_letter in label_ranges:
+                sheet.merge_cells(f"{start_col_letter}{start_row + 1}:{end_col_letter}{start_row + 1}")
+                top_label_cell = sheet[f"{start_col_letter}{start_row + 1}"]
+                top_label_cell.value = label
+                top_label_cell.fill = top_label_fill
+                top_label_cell.font = top_label_font
+                top_label_cell.alignment = top_label_alignment
+                top_label_cell.border = thin_border
+
+            # Write headers below the top labels
+            for col_idx, header in enumerate(headers, start=start_col):
+                cell = sheet.cell(row=start_row + 2, column=col_idx)
+                cell.value = header
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
                 cell.border = thin_border
 
-        # Write subtotal row (moved one row up)
-        subtotal_row = start_row + len(df) + 2  # Subtotal row is now directly after the last data row
-        start_merge_col = get_column_letter(start_col)
-        end_merge_col = get_column_letter(start_col + 6)  # Merge columns A to G
-        sheet.merge_cells(f"{start_merge_col}{subtotal_row}:{end_merge_col}{subtotal_row}")
-        subtotal_cell = sheet.cell(row=subtotal_row, column=start_col)
-        subtotal_cell.value = subtotal_text
-        subtotal_cell.fill = subtotal_fill
-        subtotal_cell.font = Font(bold=True, color="FFFFFF")  # White font for subtotal, bold
-        subtotal_cell.alignment = subtotal_alignment
-        subtotal_cell.border = thin_border
+            # Write data below headers
+            for r_idx in range(len(df)):
+                for c_idx in range(len(df.columns)):
+                    cell = sheet.cell(row=start_row + r_idx + 3, column=start_col + c_idx)
+                    cell.value = df.iloc[r_idx, c_idx]
+                    cell.border = thin_border
 
-        for col_idx in range(start_col + 7, start_col + len(headers)):
-            cell = sheet.cell(row=subtotal_row, column=col_idx)
-            cell.font = Font(bold=True)  # Apply bold to the subtotal values
-            cell.border = thin_border
+            # Write subtotal row and format
+            subtotal_row = start_row + len(df) + 2  # Directly after data rows (moved one row up)
+            start_merge_col = get_column_letter(start_col)
+            end_merge_col = get_column_letter(start_col + 6)  # Merge columns A to G
+            sheet.merge_cells(f"{start_merge_col}{subtotal_row}:{end_merge_col}{subtotal_row}")
+            subtotal_cell = sheet.cell(row=subtotal_row, column=start_col)
+            subtotal_cell.value = subtotal_text
+            subtotal_cell.fill = subtotal_fill
+            subtotal_cell.font = subtotal_font
+            subtotal_cell.alignment = subtotal_alignment
+            subtotal_cell.border = thin_border
+
+            # Apply subtotal styling to all columns in the subtotal row after column G
+            for col_idx in range(start_col + 7, start_col + len(headers)):
+                cell = sheet.cell(row=subtotal_row, column=col_idx)
+                cell.font = subtotal_value_font
+                cell.border = thin_border
 
     # Write the data to the worksheet
     start_row = 7
     start_col = 1
 
-    # Write IAC data
-    write_dataframe_to_sheet(iac_df, start_row, start_col, subtotals[0])
-    # Calculate the new starting row for the next table
-    start_row += len(iac_df) + 5
-
-    # Write IHAC data
-    write_dataframe_to_sheet(ihac_df, start_row, start_col, subtotals[1])
-    start_row += len(ihac_df) + 5
-
-    # Write MAC data
-    write_dataframe_to_sheet(mac_df, start_row, start_col, subtotals[2])
-    start_row += len(mac_df) + 5
-
-    # Write MHAC data
-    write_dataframe_to_sheet(mhac_df, start_row, start_col, subtotals[3])
+    # Write IAC, IHAC, MAC, MHAC data
+    for df_filtered, subtotal_text in zip(filtered_dfs, subtotals):
+        write_dataframe_to_sheet(df_filtered, start_row, start_col, subtotal_text)
+        # Update start_row for the next dataset
+        start_row += len(df_filtered) + 4
 
     # Save the updated workbook
-    updated_excel_path = 'csv/res/temp_final.xlsx'
+    updated_excel_path = 'csv/OK/excel_with_flight.xlsx'
     workbook.save(updated_excel_path)
 
-    # Return the path of the updated file
     return updated_excel_path
 
 def create_excel_train():
@@ -1824,7 +2079,7 @@ def create_excel_train():
     metro_df.rename(columns=rename_columns, inplace=True)
 
     # Load the existing Excel file
-    excel_path = "csv/res/temp_final.xlsx"
+    excel_path = "csv/OK/excel_with_flight.xlsx"
     workbook = load_workbook(excel_path)
 
     # Select the worksheets "Etat 1.2" and "Etat 1.3"
@@ -1942,42 +2197,40 @@ def create_excel_train():
     write_dataframe_to_sheet(euro_df, metro_sheet, start_row=4, start_col=1, global_text="GLOBAL RAIL")
 
     # Save the updated workbook
-    updated_excel_path = 'csv/OK/temp_final.xlsx'
+    updated_excel_path = 'csv/OK/excel_with_all.xlsx'
     workbook.save(updated_excel_path)
 
     # Return the path of the updated file
     return updated_excel_path
 
 def extract_global():
-    import pandas as pd
 
-    # Load the provided CSV file
-    csv_path = "csv/OK/totals_flight.csv"
-    totals_flight = pd.read_csv(csv_path)
+    # Load the uploaded CSV file into a DataFrame
+    file_path = 'csv/OK/total_flight.csv'
+    df = pd.read_csv(file_path)
 
-    # Extract the row for "Total GLOBAL"
-    total_global_row = totals_flight[totals_flight['ANNEX_C'] == 'Total GLOBAL 2']
+    # Extract the last row of the DataFrame
+    last_row = df.tail(1)
 
-    # Define the required columns in the specified order
-    required_columns = [
-        "CA TOTAL INDUSTRIE_N", "RR_CA TOTAL INDUSTRIE", "NB O&D INDUSTRIE_N", "RR_NB O&D INDUSTRIE",
-        "CA GROUPE AF KL_N", "RR_CA GROUPE AF KL", "NB O&D GROUPE AF KL_N", "RR_NB O&D GROUPE AF KL",
-        "TP_CA_AF_KL", "TP_CA_AF_KL_ONLINE", "EVOL_TP_CA", "TP_OD_AF_KL", "TP_OD_AF_KL_ONLINE", "EVOL_TP_OD",
-        "cumul_CA_TOTAL_INDUSTRIE", "cumul_RR_CA TOTAL INDUSTRIE", "cumul_NB_O&D_INDUSTRIE",
-        "cumul_RR_NB O&D INDUSTRIE",
-        "cumul_CA_GROUPE_AF_KL", "cumul_RR_CA GROUPE AF KL", "cumul_NB_O&D_GROUPE_AF_KL",
-        "cumul_RR_NB O&D GROUPE AF KL",
-        "cumul_TP_CA_AF_KL", "cumul_TP_CA_AF_KL_ONLINE", "cumul_EVOL_TP_CA", "cumul_TP_OD_AF_KL",
-        "cumul_TP_OD_AF_KL_ONLINE", "cumul_EVOL_TP_OD"
+    columns_to_keep = [
+        'ORIGIN_AREA',
+        'current_CA_INDUSTRIE_N', 'current_RR_CA_INDUSTRIE_N', 'current_OD_INDUSTRIE_N', 'current_RR_OD_INDUSTRIE_N',
+        'current_CA_AFKL_N', 'current_RR_CA_AFKL_N', 'current_OD_AFKL_N', 'current_RR_OD_AFKL_N',
+        'current_TP_CA_AFKL_N', 'current_TP_CA_AFKL_ONLINE_N', 'current_EVOL_TP_CA',
+        'current_TP_OD_AFKL_N', 'current_TP_OD_AFKL_ONLINE_N', 'current_EVOL_TP_OD',
+        'cumul_CA_INDUSTRIE_N', 'cumul_RR_CA_INDUSTRIE_N', 'cumul_OD_INDUSTRIE_N', 'cumul_RR_OD_INDUSTRIE_N',
+        'cumul_CA_AFKL_N', 'cumul_RR_CA_AFKL_N', 'cumul_OD_AFKL_N', 'cumul_RR_OD_AFKL_N',
+        'cumul_TP_CA_AFKL_N', 'cumul_TP_CA_AFKL_ONLINE_N', 'cumul_EVOL_TP_CA',
+        'cumul_TP_OD_AFKL_N', 'cumul_TP_OD_AFKL_ONLINE_N', 'cumul_EVOL_TP_OD'
     ]
 
-    # Keep only the required columns from "Total GLOBAL"
-    if not total_global_row.empty:
-        total_global_filtered = total_global_row[required_columns]
+    # Keep only the specified columns in the last row extract
+    filtered_last_row = last_row[columns_to_keep]
+    filtered_last_row = filtered_last_row.round(2)
 
-        # Save the filtered row into a new CSV file
-        output_path = "csv/OK/total_global.csv"
-        total_global_filtered.to_csv(output_path)
+    # Save the last row to a new CSV file
+    output_path = 'csv/OK/total_global.csv'
+    filtered_last_row.to_csv(output_path, index=False)
 
 
 def add_global(name_orga):
@@ -1987,7 +2240,7 @@ def add_global(name_orga):
 
 
     # Load the provided Excel and CSV files
-    excel_path = "csv/OK/temp_final.xlsx"
+    excel_path = "csv/OK/excel_with_all.xlsx"
     csv_path = f"csv/OK/total_global.csv"
 
     # Load the CSV file to get the "Total GLOBAL" row
@@ -2031,22 +2284,19 @@ def add_global(name_orga):
         print("Total GLOBAL row not found in the CSV file or 'SOUS TOTAL MHAC' not found in the Excel sheet.")
 
 import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, Font, Alignment
 
 def joli(name_orga):
     # Load the provided Excel workbook
-    file_path = f"csv/OK/{name_orga}_September_2024.xlsx"
-    workbook = openpyxl.load_workbook(file_path)
-
+    file_path = f"csv/OK/{name_orga}_{last_month_name}_{current_year}.xlsx"
     workbook = openpyxl.load_workbook(file_path)
 
     # Define the white fill style for the added columns
     white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
 
     # Define the styles for "TOTAL GLOBAL"
-    header_fill = PatternFill(start_color="5C4292", end_color="5C4292",
-                              fill_type="solid")  # Purple fill with better contrast
+    header_fill = PatternFill(start_color="5C4292", end_color="5C4292", fill_type="solid")  # Purple fill with better contrast
     header_font_white = Font(bold=True, color="FFFFFF")  # White font for header text
     header_font_black = Font(bold=True, color="000000")  # Black font for other cells in the row
     header_alignment = Alignment(horizontal="center", vertical="center")
@@ -2133,8 +2383,32 @@ def joli(name_orga):
             new_range = f"{get_column_letter(new_min_col)}{merged_cell.min_row}:{get_column_letter(new_max_col)}{merged_cell.max_row}"
             sheet.merge_cells(new_range)
 
+    # Convert specified columns to percentages in "Etat 1.1" and format to 2 decimal places
+    sheet = workbook["Etat 1.1"]
+    columns_to_convert_etat_1_1 = ["I", "K", "M", "O", "P", "Q", "S", "T", "X", "Z", "AB", "AD", "AE", "AF", "AH", "AI"]
+
+    for col_letter in columns_to_convert_etat_1_1:
+        col_idx = openpyxl.utils.column_index_from_string(col_letter)
+        for row in range(4, sheet.max_row + 1):  # Starting from row 4 (after headers)
+            cell = sheet.cell(row=row, column=col_idx)
+            if isinstance(cell.value, (int, float)):
+                cell.value = cell.value / 100  # Convert to percentage
+                cell.number_format = '0.00%'  # Set cell format to percentage with 2 decimals
+
+    # Convert specified columns to percentages in "Etat 1.2" and "Etat 1.3" and format to 2 decimal places
+    columns_to_convert_etat_1_2_1_3 = ["F", "H", "K", "M"]
+    for sheet_name in ["Etat 1.2", "Etat 1.3"]:
+        sheet = workbook[sheet_name]
+        for col_letter in columns_to_convert_etat_1_2_1_3:
+            col_idx = openpyxl.utils.column_index_from_string(col_letter)
+            for row in range(4, sheet.max_row + 1):  # Starting from row 4 (after headers)
+                cell = sheet.cell(row=row, column=col_idx)
+                if isinstance(cell.value, (int, float)):
+                    cell.value = cell.value / 100  # Convert to percentage
+                    cell.number_format = '0.00%'  # Set cell format to percentage with 2 decimals
+
     # Save the updated workbook
-    output_path = f"csv/OK/{name_orga}_September_2024.xlsx"
+    output_path = f"csv/OK/{name_orga}_{last_month_name}_{current_year}.xlsx"
     workbook.save(output_path)
 
 
