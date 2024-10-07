@@ -822,6 +822,8 @@ def clean_train(id_soc,iata):
     ).reset_index()
     grouped_result = grouped_result.sort_values(by=['O&D', 'ISSUED_MONTH'], ascending=[True, False])
 
+    grouped_result['TOTAL_BILLED'] = grouped_result['TOTAL_BILLED'].round(0)
+
     # Connexion en base pour recup OIN et NAME
     result = col_soc.find_one({"_id": ObjectId(f"{id_soc}")},
                               {"name": 1, "settings.flight.bluebizz": 1, "_id": 0})
@@ -1472,7 +1474,7 @@ def aggreg_flight(id_soc,name_orga):
     df = df.sort_values(by=['O&D', 'DATE D\'EMISSION'], ascending = [True, False])
     df = df.drop(columns=['O&D'])
     # Save the result to a new CSV file
-    df.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_air.xlsx",index = False)
+    df.to_excel(f"csv/OK/Aggregated-IATA_air.xlsx",index = False)
 
 def aggreg_train(id_soc,name_orga):
     df_euro = pd.read_csv(f"csv/res/train/grouped_train_euro_{id_soc}.csv")
@@ -1493,8 +1495,8 @@ def aggreg_train(id_soc,name_orga):
     df_euro = df_euro.drop(columns=['O&D',"Zone"])
 
     # Save the results to new CSV files
-    df_euro.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_rail_euro.xlsx", index=False)
-    df_metro.to_excel(f"csv/OK/Aggregated-IATA_{name_orga}_rail_metro.xlsx", index=False)
+    df_euro.to_excel(f"csv/OK/Aggregated-IATA_rail_euro.xlsx", index=False)
+    df_metro.to_excel(f"csv/OK/Aggregated-IATA_rail_metro.xlsx", index=False)
 
     print("Reorganization and saving completed for both df_euro and df_metro.")
 
