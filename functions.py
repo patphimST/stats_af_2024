@@ -49,14 +49,14 @@ def get_soc(id_soc):
 
     return osi,name_orga
 
-def get_bills(id_soc,start_date):
+def get_bills(id_soc,start_date,end_date):
     import pandas as pd
     from pymongo import MongoClient
 
     # Définir les critères de filtrage
     filter_criteria = {
         "societyId": f"{id_soc}",
-        "createdAt": {"$gte": start_date},
+        "createdAt": {"$gte": start_date,"$lte" :end_date},
         "type": {"$in": ["receipt", "credit", "unitary"]}
     }
 
@@ -1420,31 +1420,38 @@ def merge_rr(id_soc):
 def split_final(id_soc):
     import pandas as pd
 
-    # Load the input CSV files
+    # Load the input CSV file
     df = pd.read_csv(f"csv/res/flight/flight_full_{id_soc}.csv")
 
     # Define the desired column order
     columns_order = [
-        'O&D', 'ANNEX_C', 'ORI', 'DEST', 'LABEL_ORIGIN', 'LABEL_DESTINATION', 'COUNTRY_OF_DEST',
-        'HAUL_TYPE', 'ORIGIN_AREA',
-
-        'current_CA_INDUSTRIE_N', 'current_RR_CA_INDUSTRIE_N',
-        'current_OD_INDUSTRIE_N', 'current_RR_OD_INDUSTRIE_N',
-        'current_CA_AFKL_N', 'current_RR_CA_AFKL_N',
-        'current_OD_AFKL_N', 'current_RR_OD_AFKL_N',
-        'current_TP_CA_AFKL_N', 'current_TP_CA_AFKL_ONLINE_N','current_EVOL_TP_CA',
-        'current_TP_OD_AFKL_N', 'current_TP_OD_AFKL_ONLINE_N', 'current_EVOL_TP_OD',
-
-        'cumul_CA_INDUSTRIE_N', 'cumul_RR_CA_INDUSTRIE_N',
-        'cumul_OD_INDUSTRIE_N', 'cumul_RR_OD_INDUSTRIE_N',
-        'cumul_CA_AFKL_N', 'cumul_RR_CA_AFKL_N',
-        'cumul_OD_AFKL_N', 'cumul_RR_OD_AFKL_N',
-        'cumul_TP_CA_AFKL_N', 'cumul_TP_CA_AFKL_ONLINE_N', 'cumul_EVOL_TP_CA',
-        'cumul_TP_OD_AFKL_N', 'cumul_TP_OD_AFKL_ONLINE_N', 'cumul_EVOL_TP_OD',
+        'O&D', 'ZONE ORIGINE', 'PERIMETRE', 'LIBELLE ORIGINE', 'LIBELLE DESTINATION', 'CODE ORIGINE', 'CODE DESTINATION',
+        'REFERENCE AF', 'RAISON SOCIALE', 'cumul_OD_AFKL_N', 'cumul_CA_AFKL_N', 'cumul_OD_INDUSTRIE_N',
+        'cumul_CA_INDUSTRIE_N', 'cumul_OD_AFKL_N_1', 'cumul_CA_AFKL_N_1', 'cumul_OD_INDUSTRIE_N_1',
+        'cumul_CA_INDUSTRIE_N_1', 'cumul_OD_AFKL_ONLINE_N', 'cumul_CA_AFKL_ONLINE_N', 'cumul_OD_INDUSTRIE_ONLINE_N',
+        'cumul_CA_INDUSTRIE_ONLINE_N', 'cumul_OD_AFKL_ONLINE_N_1', 'cumul_CA_AFKL_ONLINE_N_1',
+        'cumul_OD_INDUSTRIE_ONLINE_N_1', 'cumul_CA_INDUSTRIE_ONLINE_N_1', 'cumul_TP_OD_AFKL_N', 'cumul_TP_CA_AFKL_N',
+        'cumul_TP_OD_AFKL_ONLINE_N', 'cumul_TP_CA_AFKL_ONLINE_N', 'cumul_TP_OD_AFKL_N_1', 'cumul_TP_CA_AFKL_N_1',
+        'cumul_TP_OD_AFKL_ONLINE_N_1', 'cumul_TP_CA_AFKL_ONLINE_N_1', 'cumul_RR_OD_AFKL_N', 'cumul_RR_CA_AFKL_N',
+        'cumul_RR_OD_INDUSTRIE_N', 'cumul_RR_CA_INDUSTRIE_N', 'cumul_EVOL_TP_OD', 'cumul_EVOL_TP_CA', 'ZONE ORIGINE_cumul',
+        'PERIMETRE_cumul', 'LIBELLE ORIGINE_cumul', 'LIBELLE DESTINATION_cumul', 'CODE ORIGINE_cumul',
+        'CODE DESTINATION_cumul', 'REFERENCE AF_cumul', 'RAISON SOCIALE_cumul', 'current_OD_AFKL_N',
+        'current_CA_AFKL_N', 'current_OD_INDUSTRIE_N', 'current_CA_INDUSTRIE_N', 'current_OD_AFKL_N_1',
+        'current_CA_AFKL_N_1', 'current_OD_INDUSTRIE_N_1', 'current_CA_INDUSTRIE_N_1', 'current_OD_AFKL_ONLINE_N',
+        'current_CA_AFKL_ONLINE_N', 'current_OD_INDUSTRIE_ONLINE_N', 'current_CA_INDUSTRIE_ONLINE_N',
+        'current_OD_AFKL_ONLINE_N_1', 'current_CA_AFKL_ONLINE_N_1', 'current_OD_INDUSTRIE_ONLINE_N_1',
+        'current_CA_INDUSTRIE_ONLINE_N_1', 'current_TP_OD_AFKL_N', 'current_TP_CA_AFKL_N', 'current_TP_OD_AFKL_ONLINE_N',
+        'current_TP_CA_AFKL_ONLINE_N', 'current_TP_OD_AFKL_N_1', 'current_TP_CA_AFKL_N_1', 'current_TP_OD_AFKL_ONLINE_N_1',
+        'current_TP_CA_AFKL_ONLINE_N_1', 'current_RR_OD_AFKL_N', 'current_RR_CA_AFKL_N', 'current_RR_OD_INDUSTRIE_N',
+        'current_RR_CA_INDUSTRIE_N', 'current_EVOL_TP_OD', 'current_EVOL_TP_CA', 'HAUL_TYPE', 'ORIGIN_AREA', 'ANNEX_C',
+        'LABEL_ORIGIN', 'LABEL_DESTINATION', 'COUNTRY_OF_DEST', 'ORI', 'DEST'
     ]
 
     # Split the DataFrame based on the 'ANNEX_C' column
     df_split = dict(tuple(df.groupby('ANNEX_C')))
+
+    # Define the filenames to always create
+    filenames = ['IAC', 'IHAC', 'MAC', 'MHAC']
 
     # Iterate through the split DataFrames and save each part as a CSV file locally, reordering columns
     for key, df_part in df_split.items():
@@ -1454,10 +1461,19 @@ def split_final(id_soc):
         # Create the filename based on the 'ANNEX_C' value
         filename = f"csv/OK/{key}.csv"
 
-        # Save the DataFrame part with totals to a CSV file locally
+        # Save the DataFrame part to a CSV file locally
         df_part.to_csv(filename, index=False)
 
-    print("Files saved successfully with reordered columns for each split file!")
+    # For each of the four required files, check if they exist and create them if not
+    for filename in filenames:
+        filepath = f"csv/OK/{filename}.csv"
+        if filename not in df_split:
+            # Create a DataFrame with only the header
+            df_empty = pd.DataFrame(columns=columns_order)
+            df_empty.to_csv(filepath, index=False)
+
+    print("Files saved successfully, with empty files created for missing keys.")
+
 
 def aggreg_flight(id_soc,name_orga):
     df = pd.read_csv(f"csv/res/flight/grouped_flight_{id_soc}.csv")
@@ -1474,7 +1490,7 @@ def aggreg_flight(id_soc,name_orga):
     df = df.sort_values(by=['O&D', 'DATE D\'EMISSION'], ascending = [True, False])
     df = df.drop(columns=['O&D'])
     # Save the result to a new CSV file
-    df.to_excel(f"csv/OK/Aggregated-IATA_air.xlsx",index = False)
+    df.to_excel(f"csv/OK/{name_orga}_Aggregated-IATA_air.xlsx",index = False)
 
 def aggreg_train(id_soc,name_orga):
     df_euro = pd.read_csv(f"csv/res/train/grouped_train_euro_{id_soc}.csv")
@@ -1495,18 +1511,33 @@ def aggreg_train(id_soc,name_orga):
     df_euro = df_euro.drop(columns=['O&D',"Zone"])
 
     # Save the results to new CSV files
-    df_euro.to_excel(f"csv/OK/Aggregated-IATA_rail_euro.xlsx", index=False)
-    df_metro.to_excel(f"csv/OK/Aggregated-IATA_rail_metro.xlsx", index=False)
+    df_euro.to_excel(f"csv/OK/{name_orga}_Aggregated-IATA_rail_euro.xlsx", index=False)
+    df_metro.to_excel(f"csv/OK/{name_orga}_Aggregated-IATA_rail_metro.xlsx", index=False)
 
     print("Reorganization and saving completed for both df_euro and df_metro.")
 
+
 def calculate_rr_train(id_soc, df_name):
+    import pandas as pd
+
     # Load the CSV file into a DataFrame
     df = pd.read_csv(f'csv/res/train/grouped_train_{df_name}_{id_soc}.csv')
 
+    # Define the header for the output CSV
+    columns_order = [
+        'O&D', 'CODE ORIGINE', 'CODE DESTINATION', 'LIBELLE ORIGINE', 'LIBELLE DESTINATION',
+        'CA_last_month_N', 'OD_last_month_N', 'CA_last_month_N_1', 'OD_last_month_N_1',
+        'CA_jan_to_last_month_N', 'OD_jan_to_last_month_N', 'CA_jan_to_last_month_N_1', 'OD_jan_to_last_month_N_1',
+        'RR_CA', 'RR_OD', 'cumul_RR_CA', 'cumul_RR_OD'
+    ]
+
     # Check if the DataFrame is empty
     if df.empty:
-        print(f"The {df_name} dataset is empty. No calculations can be performed.")
+        print(f"The {df_name} dataset is empty. Creating an empty CSV with headers.")
+
+        # Create an empty DataFrame with only the header and save it
+        df_empty = pd.DataFrame(columns=columns_order)
+        df_empty.to_csv(f'csv/OK/total_{df_name}.csv', index=False)
         return
 
     # Convert 'DATE D'EMISSION' to datetime using the format '%Y%m'
@@ -1573,21 +1604,27 @@ def calculate_rr_train(id_soc, df_name):
     df_aggregated[cols_to_round] = df_aggregated[cols_to_round].round(0)
 
     # Calculate the Rate of Change (RR) for CA and O&D
-    df_aggregated['RR_CA'] = (((df_aggregated['CA_last_month_N'] / df_aggregated['CA_last_month_N_1']) - 1)*100).round(2)
-    df_aggregated['RR_OD'] = (((df_aggregated['OD_last_month_N'] / df_aggregated['OD_last_month_N_1']) - 1)*100).round(2)
+    df_aggregated['RR_CA'] = (
+                ((df_aggregated['CA_last_month_N'] / df_aggregated['CA_last_month_N_1']) - 1) * 100).round(2)
+    df_aggregated['RR_OD'] = (
+                ((df_aggregated['OD_last_month_N'] / df_aggregated['OD_last_month_N_1']) - 1) * 100).round(2)
 
     # Calculate the Cumulative Rate of Change (RR CUMUL) for CA and O&D
-    df_aggregated['cumul_RR_CA'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated['CA_jan_to_last_month_N_1']) - 1)*100).round(2)
-    df_aggregated['cumul_RR_OD'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated['OD_jan_to_last_month_N_1']) - 1)*100).round(2)
+    df_aggregated['cumul_RR_CA'] = (((df_aggregated['CA_jan_to_last_month_N'] / df_aggregated[
+        'CA_jan_to_last_month_N_1']) - 1) * 100).round(2)
+    df_aggregated['cumul_RR_OD'] = (((df_aggregated['OD_jan_to_last_month_N'] / df_aggregated[
+        'OD_jan_to_last_month_N_1']) - 1) * 100).round(2)
 
     # Calculate the total values for each metric
     total_values = df_aggregated[cols_to_round].sum()
 
     # Calculate the Rate of Change (RR) using total values
-    rr_od_last_month = ((total_values['OD_last_month_N'] / total_values['OD_last_month_N_1'] - 1)*100).round(2)
-    rr_ca_last_month = ((total_values['CA_last_month_N'] / total_values['CA_last_month_N_1'] - 1)*100).round(2)
-    rr_ca_jan_to_last_month = ((total_values['CA_jan_to_last_month_N'] / total_values['CA_jan_to_last_month_N_1'] - 1)*100).round(2)
-    rr_od_jan_to_last_month = ((total_values['OD_jan_to_last_month_N'] / total_values['OD_jan_to_last_month_N_1'] - 1)*100).round(2)
+    rr_od_last_month = ((total_values['OD_last_month_N'] / total_values['OD_last_month_N_1'] - 1) * 100).round(2)
+    rr_ca_last_month = ((total_values['CA_last_month_N'] / total_values['CA_last_month_N_1'] - 1) * 100).round(2)
+    rr_ca_jan_to_last_month = (
+                (total_values['CA_jan_to_last_month_N'] / total_values['CA_jan_to_last_month_N_1'] - 1) * 100).round(2)
+    rr_od_jan_to_last_month = (
+                (total_values['OD_jan_to_last_month_N'] / total_values['OD_jan_to_last_month_N_1'] - 1) * 100).round(2)
 
     # Create a DataFrame for the total row
     total_row = pd.DataFrame([{
@@ -1615,6 +1652,8 @@ def calculate_rr_train(id_soc, df_name):
 
     # Save the aggregated DataFrame with the total row to CSV
     df_aggregated.to_csv(f'csv/OK/total_{df_name}.csv', index=False)
+
+    print(f"File total_{df_name}.csv saved successfully.")
 
 def total_old(id_soc):
     # Load the CSV file
@@ -1861,6 +1900,7 @@ def total_global(id_soc):
 
 def create_excel_flight():
     # Load the CSV files into DataFrames
+
     iac_df = pd.read_csv('csv/OK/IAC.csv')
     ihac_df = pd.read_csv('csv/OK/IHAC.csv')
     mac_df = pd.read_csv('csv/OK/MAC.csv')
@@ -2409,11 +2449,63 @@ def joli(name_orga):
                     cell.value = cell.value / 100  # Convert to percentage
                     cell.number_format = '0.00%'  # Set cell format to percentage with 2 decimals
 
+    new_value = f"Nom du compte : {name_orga}"
+
+    # List of the target sheets
+    sheets_to_update = ['Etat 1.1', 'Etat 1.2', 'Etat 1.3']
+
+    # Update cell A2 in each specified sheet
+    for sheet_name in sheets_to_update:
+        if sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+            sheet['A2'].value = new_value
+
     # Save the updated workbook
     output_path = f"csv/OK/{name_orga}_{last_month_name}_{current_year}.xlsx"
     workbook.save(output_path)
 
+def merge_all():
+    import pandas as pd
+    import os
 
+    # Define the directory containing the files
+    directory = 'archives/Aggregated/'
+
+    # Define the file patterns for each category
+    file_patterns = {
+        'rail_metro': '_rail_metro.xlsx',
+        'rail_euro': '_rail_euro.xlsx',
+        'air': '_air.xlsx'
+    }
+
+    # Initialize empty DataFrames for each category
+    merged_dfs = {
+        'rail_metro': pd.DataFrame(),
+        'rail_euro': pd.DataFrame(),
+        'air': pd.DataFrame()
+    }
+
+    # Loop over the files in the directory and merge based on pattern
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if os.path.isfile(file_path):
+            # Determine which category the file belongs to and merge
+            for key, pattern in file_patterns.items():
+                if pattern in filename:
+                    df = pd.read_excel(file_path)
+                    merged_dfs[key] = pd.concat([merged_dfs[key], df], ignore_index=True)
+
+    # Save the merged DataFrames to new Excel files
+    output_files = {
+        'rail_metro': f'{directory}/FINAL/Aggregated_IATA_rail_metro.xlsx',
+        'rail_euro': f'{directory}/FINAL/Aggregated_IATA_rail_euro.xlsx',
+        'air': f'{directory}/FINAL/Aggregated_IATA_air.xlsx'
+    }
+
+    for key, output_file in output_files.items():
+        merged_dfs[key].to_excel(output_file, index=False)
+
+    output_files
 
 
 
