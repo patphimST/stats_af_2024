@@ -1951,7 +1951,7 @@ def create_excel_flight():
 
         # Define headers to be used for each table
         headers = [
-            "ORI", "DEST", "DESTINATION", "ORIGINE", "CODE_PAYS", "TYPE_COURRIER", "ZONE_ORIGINE",
+            "ORI", "DEST", "ORIGINE", "DESTINATION", "CODE_PAYS", "TYPE_COURRIER", "ZONE_ORIGINE",
             "CA", "R/R", "O&D", "R/R", "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE",
             "EVOL T/P (CA)", "T/P O&D", "T/P O&D ONLINE", "EVOL T/P (O&D)", "CA", "R/R", "O&D", "R/R",
             "CA", "R/R", "O&D", "R/R", "T/P CA", "T/P CA ONLINE", "EVOL T/P (CA)", "T/P O&D",
